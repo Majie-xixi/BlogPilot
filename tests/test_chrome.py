@@ -34,4 +34,5 @@ class ChromeTests(unittest.TestCase):
         script = build_fill_script('标题"一', "# 标题\n```python\nprint('x')\n```", "AI 智能体")
         self.assertIn("标题\\\"一", script)
         self.assertIn("AI 智能体", script)
-        self.assertIn("dry", script)
+        self.assertIn("Object.getOwnPropertyDescriptor", script)
+        self.assertIn("textarea.write-area", script)

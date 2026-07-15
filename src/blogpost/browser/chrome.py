@@ -76,6 +76,16 @@ class ChromeController:
     def open_tab(self, url: str) -> dict:
         return self._json_request(f"/json/new?{quote(url, safe=':/?=&')}", method="PUT")
 
+    def wait_for_target(self, url_prefix: str, timeout: float = 15) -> dict:
+        """Wait for Chrome to expose a page target for a newly opened URL."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for target in self.list_targets():
+                if target.get("type") == "page" and str(target.get("url", "")).startswith(url_prefix):
+                    return target
+            time.sleep(0.2)
+        raise TimeoutError(f"Chrome 页面打开超时：{url_prefix}")
+
     def _json_request(self, path: str, method: str = "GET") -> dict:
         if self.port is None:
             raise RuntimeError("Chrome is not started")

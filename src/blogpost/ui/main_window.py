@@ -10,8 +10,10 @@ from tkinter import messagebox, ttk
 import webbrowser
 
 from blogpost.application import ApplicationContext
-from blogpost.domain import RunStatus, Trigger
-from blogpost.paths import log_path
+from blogpost.domain import Article, PublishResult, RunStatus, Trigger
+from blogpost.markdown import parse_markdown
+from blogpost.paths import app_data_dir, log_path
+from blogpost.run_lock import AlreadyRunning, RunLock
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
 
@@ -114,6 +116,14 @@ class MainWindow:
             button.pack(side="left", padx=(0 if not actions.winfo_children() else 10, 0))
             if text == "打开最近文章":
                 self.latest_article_button = button
+
+        self.retry_button = ttk.Button(
+            actions,
+            text="重新发布最近文章",
+            style="Secondary.TButton",
+            command=self.retry_latest_article,
+        )
+        self.retry_button.pack(side="left", padx=(10, 0))
 
         section = ttk.Frame(page, style="Page.TFrame")
         section.grid(row=4, column=0, sticky="ew", pady=(0, 7))
@@ -257,6 +267,9 @@ class MainWindow:
             )
         latest = self.context.repository.latest_article_path()
         self.latest_article_button.configure(state="normal" if latest and Path(latest).exists() else "disabled")
+        self.retry_button.configure(
+            state="normal" if latest and Path(latest).exists() and not self.running else "disabled"
+        )
 
     def _load_recent_log(self) -> None:
         path = log_path()
@@ -325,7 +338,69 @@ class MainWindow:
         self.progressbar.configure(mode="indeterminate")
         self.progressbar.start(12)
         self.run_button.configure(state="disabled")
+        self.retry_button.configure(state="disabled")
         threading.Thread(target=self._run_worker, args=(pipeline, allow), daemon=True).start()
+
+    def retry_latest_article(self) -> None:
+        if self.running:
+            return
+        path_text = self.context.repository.latest_article_path()
+        path = Path(path_text) if path_text else None
+        if path is None or not path.exists():
+            messagebox.showinfo("暂无文章", "没有找到可重新发布的已保存文章。")
+            return
+        if not messagebox.askyesno(
+            "重新发布最近文章",
+            f"将直接发布下面这篇文章，不会调用大模型重新生成：\n\n{path.name}\n\n是否继续？",
+        ):
+            return
+        self.running = True
+        self._clear_log()
+        self._show_log_view()
+        self._append_log(f"正在读取已保存文章：{path.name}")
+        self.progress_var.set("正在重新发布 · 不会重新生成文章")
+        self.progressbar.configure(mode="indeterminate")
+        self.progressbar.start(12)
+        self.run_button.configure(state="disabled")
+        self.retry_button.configure(state="disabled")
+        threading.Thread(target=self._retry_worker, args=(path,), daemon=True).start()
+
+    def _retry_worker(self, path: Path) -> None:
+        run = None
+        try:
+            with RunLock(app_data_dir() / "run.lock"):
+                markdown = path.read_text(encoding="utf-8")
+                document = parse_markdown(markdown)
+                article = Article(document.title, markdown, document.title)
+                run = self.context.repository.create_publish_retry(str(path))
+                self.queue.put(("progress", RunStatus.PUBLISHING, "正在重新填写 51CTO 编辑器，不调用大模型"))
+                result = self.context.publisher.publish(
+                    article,
+                    self.context.config.category,
+                    self.context.config.dry_run,
+                )
+                if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
+                    self.context.repository.update_run(
+                        run.id,
+                        result.status,
+                        error_code=None if result.status == RunStatus.PUBLISHED else "publish_failed",
+                        error_summary=result.message,
+                    )
+                else:
+                    self.context.repository.force_run_status(run.id, result.status)
+                result = PublishResult(
+                    result.status,
+                    url=result.url,
+                    message=result.message,
+                    article_path=str(path),
+                )
+        except AlreadyRunning as exc:
+            result = PublishResult(RunStatus.SKIPPED, message=str(exc), article_path=str(path))
+        except Exception as exc:
+            if run is not None:
+                self.context.repository.force_run_status(run.id, RunStatus.FAILED)
+            result = PublishResult(RunStatus.FAILED, message=str(exc), article_path=str(path))
+        self.queue.put(("done", result))
 
     def _run_worker(self, pipeline, allow: bool) -> None:
         result = pipeline.run(

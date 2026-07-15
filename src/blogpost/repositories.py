@@ -19,6 +19,26 @@ class Repository:
             )
         return run
 
+    def create_publish_retry(self, path: str, trigger: Trigger = Trigger.MANUAL) -> Run:
+        """Create a run that republishes an already generated article."""
+        run = Run.new(trigger)
+        run.status = RunStatus.PUBLISHING
+        with self.database.connect() as connection:
+            article = connection.execute(
+                "SELECT id FROM articles WHERE path = ? ORDER BY id DESC LIMIT 1", (path,)
+            ).fetchone()
+            connection.execute(
+                "INSERT INTO runs(id, trigger, status, started_at, article_id) VALUES(?, ?, ?, ?, ?)",
+                (
+                    run.id,
+                    run.trigger.value,
+                    run.status.value,
+                    run.started_at.isoformat(),
+                    int(article["id"]) if article is not None else None,
+                ),
+            )
+        return run
+
     def get_run(self, run_id: str) -> Run:
         with self.database.connect() as connection:
             row = connection.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
