@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blogpost-publisher"
+version = "0.1.0"
+description = "Daily AI article generation and safe 51CTO publishing for Windows"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+blogpost-publisher = "blogpost.cli:main"
+
+[project.gui-scripts]
+blogpost-publisher-gui = "blogpost.ui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+blogpost = ["migrations/*.sql"]

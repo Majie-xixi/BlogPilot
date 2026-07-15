@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.spec.bak
+*.db
+*.db-shm
+*.db-wal
+*.log
+playwright-profile/
+.env
+.agents/
+openspec/
+docs/superpowers/
