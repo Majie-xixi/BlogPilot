@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time
 from enum import StrEnum
 import uuid
 
@@ -56,6 +56,38 @@ class InvalidTransition(RuntimeError):
     pass
 
 
+DEFAULT_ACCOUNT_ID = "default"
+
+
+@dataclass(slots=True, frozen=True)
+class Account:
+    id: str
+    display_name: str
+    profile_url: str = ""
+    enabled: bool = True
+    sort_order: int = 0
+    schedule_time: time = time(10, 0)
+    monthly_target: int = 21
+    category: str = "AI 智能体"
+    secondary_category: str = "编程 Agent"
+    personal_category: str = "AI"
+    content_directions: str = "AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程"
+    keywords: str = ""
+    article_subdir: str = "default"
+
+    def validate(self) -> None:
+        if not self.id.strip():
+            raise ValueError("账号 ID 不能为空")
+        if not self.display_name.strip():
+            raise ValueError("账号名称不能为空")
+        if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
+            raise ValueError("51CTO 主页地址格式不正确")
+        if not 1 <= self.monthly_target <= 100:
+            raise ValueError("每月目标篇数必须在 1 到 100 之间")
+        if not self.article_subdir.strip() or any(char in self.article_subdir for char in '<>:"/\\|?*'):
+            raise ValueError("文章子目录名称无效")
+
+
 @dataclass(slots=True)
 class Run:
     id: str
@@ -66,10 +98,11 @@ class Run:
     article_id: int | None = None
     error_code: str | None = None
     error_summary: str | None = None
+    account_id: str = DEFAULT_ACCOUNT_ID
 
     @classmethod
-    def new(cls, trigger: Trigger) -> "Run":
-        return cls(id=str(uuid.uuid4()), trigger=trigger)
+    def new(cls, trigger: Trigger, account_id: str = DEFAULT_ACCOUNT_ID) -> "Run":
+        return cls(id=str(uuid.uuid4()), trigger=trigger, account_id=account_id)
 
     def transition(self, target: RunStatus) -> None:
         if target not in _NEXT.get(self.status, set()):

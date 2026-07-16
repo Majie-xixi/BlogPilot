@@ -38,3 +38,36 @@ class Database:
                 "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(1, ?)",
                 (datetime.now().isoformat(),),
             )
+            self._migrate_multi_account(connection)
+
+    @staticmethod
+    def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(str(row["name"]) == column for row in rows)
+
+    def _migrate_multi_account(self, connection: sqlite3.Connection) -> None:
+        migration = (
+            files("blogpost.migrations")
+            .joinpath("002_multi_account.sql")
+            .read_text(encoding="utf-8")
+        )
+        connection.executescript(migration)
+        for table in ("runs", "topics", "articles", "publish_attempts"):
+            if not self._has_column(connection, table, "account_id"):
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN account_id TEXT NOT NULL DEFAULT 'default'"
+                )
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_runs_account_started
+                ON runs(account_id, started_at);
+            CREATE INDEX IF NOT EXISTS idx_articles_account_created
+                ON articles(account_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_publish_attempts_account
+                ON publish_attempts(account_id, started_at);
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(2, ?)",
+            (datetime.now().isoformat(),),
+        )
