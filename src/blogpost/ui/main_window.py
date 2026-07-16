@@ -11,11 +11,10 @@ from tkinter import messagebox, ttk
 import webbrowser
 
 from blogpost.application import ApplicationContext
-from blogpost.domain import Article, PublishResult, RunStatus, Trigger
-from blogpost.markdown import parse_markdown
-from blogpost.paths import app_data_dir, log_path
+from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
+from blogpost.paths import log_path
 from blogpost.publishers.cto51_profile import ProfileSnapshot
-from blogpost.run_lock import AlreadyRunning, RunLock
+from blogpost.ui.account_dialog import AccountManagerDialog, BatchPublishDialog
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
 
@@ -85,7 +84,10 @@ class MainWindow:
         self.profile_snapshot: ProfileSnapshot | None = None
         self.status_refreshing = False
         self.status_refresh_generation = 0
+        self.account_map: dict[str, Account] = {}
+        self.current_account_id = DEFAULT_ACCOUNT_ID
         self._build()
+        self._reload_accounts(DEFAULT_ACCOUNT_ID)
         self.refresh()
         self._load_recent_log()
         self.root.after(150, self._drain_queue)
@@ -109,8 +111,27 @@ class MainWindow:
             text="每天生成一篇原创 AI 技术文章，并自动发布到 51CTO",
             style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Button(header, text="设置", style="Secondary.TButton", command=self.open_settings).grid(
-            row=0, column=1, rowspan=2, sticky="e"
+        account_controls = ttk.Frame(header, style="Page.TFrame")
+        account_controls.grid(row=0, column=1, rowspan=2, sticky="e")
+        ttk.Label(account_controls, text="当前账号", style="Subtitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.account_var = tk.StringVar()
+        self.account_selector = ttk.Combobox(
+            account_controls,
+            textvariable=self.account_var,
+            state="readonly",
+            width=18,
+            style="Modern.TCombobox",
+        )
+        self.account_selector.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.account_selector.bind("<<ComboboxSelected>>", self._on_account_changed)
+        ttk.Button(
+            account_controls,
+            text="账号管理",
+            style="Secondary.TButton",
+            command=self.open_account_manager,
+        ).grid(row=0, column=1, rowspan=2, padx=(10, 0))
+        ttk.Button(header, text="全局设置", style="Secondary.TButton", command=self.open_settings).grid(
+            row=0, column=2, rowspan=2, sticky="e", padx=(10, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
@@ -135,13 +156,22 @@ class MainWindow:
         ttk.Label(hero, textvariable=self.progress_var, style="HeroText.TLabel").grid(
             row=1, column=0, sticky="w", pady=(6, 0)
         )
+        hero_actions = ttk.Frame(hero, style="Surface.TFrame")
+        hero_actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=(24, 0))
         self.run_button = ttk.Button(
-            hero,
+            hero_actions,
             text="立即生成并发布",
             style="HeroButton.TButton",
             command=self.run_now,
         )
-        self.run_button.grid(row=0, column=1, rowspan=2, sticky="e", padx=(24, 0))
+        self.run_button.grid(row=0, column=0, sticky="ew")
+        self.batch_button = ttk.Button(
+            hero_actions,
+            text="批量依次发布",
+            style="Secondary.TButton",
+            command=self.open_batch_publish,
+        )
+        self.batch_button.grid(row=1, column=0, sticky="ew", pady=(7, 0))
         self.progressbar = ttk.Progressbar(
             hero,
             mode="determinate",
@@ -281,9 +311,44 @@ class MainWindow:
             row=2, column=0, columnspan=2, sticky="w"
         )
 
+    @property
+    def current_account(self) -> Account:
+        return self.account_map.get(self.current_account_id) or self.context.account()
+
+    def _reload_accounts(self, selected_id: str | None = None) -> None:
+        accounts = self.context.accounts()
+        self.account_map = {account.id: account for account in accounts}
+        labels = [account.display_name for account in accounts]
+        self.account_selector.configure(values=labels)
+        wanted = selected_id if selected_id in self.account_map else accounts[0].id
+        self.current_account_id = wanted
+        self.account_var.set(self.account_map[wanted].display_name)
+
+    def _on_account_changed(self, _event=None) -> None:
+        selected_name = self.account_var.get()
+        for account in self.account_map.values():
+            if account.display_name == selected_name:
+                self.current_account_id = account.id
+                break
+        self.status_refresh_generation += 1
+        self.status_refreshing = False
+        self.profile_snapshot = None
+        self._clear_log()
+        self._load_recent_log()
+        self.refresh()
+
+    def open_account_manager(self) -> None:
+        AccountManagerDialog(self.root, self.context, self._account_saved)
+
+    def _account_saved(self, account_id: str) -> None:
+        self._reload_accounts(account_id)
+        self.profile_snapshot = None
+        self.refresh()
+
     def refresh(self) -> None:
-        cfg = self.context.config
-        self.schedule_value_var.set(f"配置时间 {cfg.schedule_time:%H:%M}")
+        account = self.current_account
+        cfg = self.context.config_for_account(account.id)
+        self.schedule_value_var.set(f"配置时间 {account.schedule_time:%H:%M}")
         self.schedule_detail_var.set("正在检查 Windows 计划任务…")
         self._render_publication_status()
         if cfg.dry_run:
@@ -299,7 +364,8 @@ class MainWindow:
     def _refresh_history(self) -> None:
         for item in self.tree.get_children():
             self.tree.delete(item)
-        runs = list(self.context.repository.recent_runs(30))
+        account_id = self.current_account_id
+        runs = list(self.context.repository.recent_runs(30, account_id))
         if len(runs) > 8:
             self.history_scrollbar.grid()
         else:
@@ -323,7 +389,7 @@ class MainWindow:
                 ),
                 tags=(tag,) if tag else (),
             )
-        latest = self.context.repository.latest_article_path()
+        latest = self.context.repository.latest_article_path(account_id)
         self.latest_article_button.configure(state="normal" if latest and Path(latest).exists() else "disabled")
         self.retry_button.configure(
             state="normal" if latest and Path(latest).exists() and not self.running else "disabled"
@@ -331,10 +397,15 @@ class MainWindow:
 
     def _render_publication_status(self, error: str | None = None) -> None:
         today = date.today()
-        local_published = self.context.repository.has_successful_publication(today)
-        local_days = self.context.repository.count_successful_days(today.year, today.month)
+        account = self.current_account
+        local_published = self.context.repository.has_successful_publication(today, account.id)
+        local_days = self.context.repository.count_successful_days(
+            today.year,
+            today.month,
+            account.id,
+        )
         snapshot = self.profile_snapshot
-        if snapshot and snapshot.profile_url == self.context.config.profile_url.rstrip("/"):
+        if snapshot and snapshot.profile_url == account.profile_url.rstrip("/"):
             online_published = snapshot.has_publication_on(today)
             if online_published is True:
                 self.today_value_var.set("已发布")
@@ -346,7 +417,8 @@ class MainWindow:
                 self.today_value_var.set("已发布" if local_published else "状态未知")
 
             if snapshot.month_count is not None:
-                detail = f"51CTO 主页：本月已发布 {snapshot.month_count} 篇"
+                remaining = max(0, account.monthly_target - snapshot.month_count)
+                detail = f"本月 {snapshot.month_count}/{account.monthly_target} 篇 · 还差 {remaining} 篇"
             else:
                 detail = f"51CTO 今日已核对 · 软件记录本月 {local_days} 天"
             if online_published is False and local_published:
@@ -359,7 +431,7 @@ class MainWindow:
             self.today_detail_var.set("正在同步 51CTO 公开主页…")
         elif error:
             self.today_detail_var.set(f"在线核对失败 · 仅软件记录本月 {local_days} 天")
-        elif not self.context.config.profile_url:
+        elif not account.profile_url:
             self.today_detail_var.set("未设置 51CTO 主页 · 仅显示软件记录")
         else:
             self.today_detail_var.set(f"仅软件记录：本月已发布 {local_days} 天")
@@ -369,7 +441,10 @@ class MainWindow:
             return
         self.status_refresh_generation += 1
         generation = self.status_refresh_generation
-        profile_url = self.context.config.profile_url.rstrip("/")
+        account = self.current_account
+        account_id = account.id
+        profile_url = account.profile_url.rstrip("/")
+        publisher = self.context.publisher_for_account(account_id)
         self.status_refreshing = True
         self._render_publication_status()
 
@@ -378,7 +453,7 @@ class MainWindow:
             profile_error = None
             try:
                 if profile_url:
-                    snapshot = self.context.publisher.profile_status()
+                    snapshot = publisher.profile_status()
             except Exception as exc:
                 profile_error = str(exc)
             try:
@@ -386,7 +461,15 @@ class MainWindow:
             except Exception as exc:
                 schedule_status = f"检查失败：{exc}"
             self.queue.put(
-                ("runtime_status", generation, profile_url, snapshot, profile_error, schedule_status)
+                (
+                    "runtime_status",
+                    generation,
+                    account_id,
+                    profile_url,
+                    snapshot,
+                    profile_error,
+                    schedule_status,
+                )
             )
 
         threading.Thread(target=worker, daemon=True).start()
@@ -394,15 +477,16 @@ class MainWindow:
     def _apply_runtime_status(
         self,
         generation: int,
+        account_id: str,
         profile_url: str,
         snapshot: ProfileSnapshot | None,
         profile_error: str | None,
         schedule_status: str,
     ) -> None:
-        if generation != self.status_refresh_generation:
+        if generation != self.status_refresh_generation or account_id != self.current_account_id:
             return
         self.status_refreshing = False
-        if profile_url == self.context.config.profile_url.rstrip("/"):
+        if profile_url == self.current_account.profile_url.rstrip("/"):
             self.profile_snapshot = snapshot
             if (
                 snapshot
@@ -414,6 +498,7 @@ class MainWindow:
                         snapshot.latest_published_at,
                         snapshot.latest_title,
                         snapshot.latest_url,
+                        account_id,
                     )
                     self._refresh_history()
                 except Exception as exc:
@@ -421,7 +506,7 @@ class MainWindow:
         self._render_publication_status(profile_error)
 
         status = schedule_status.strip()
-        time_text = self.context.config.schedule_time.strftime("%H:%M")
+        time_text = self.current_account.schedule_time.strftime("%H:%M")
         if not status or "未安装" in status:
             self.schedule_value_var.set("尚未安装")
             self.schedule_detail_var.set(f"配置时间 {time_text} · 点击下方按钮安装")
@@ -446,6 +531,11 @@ class MainWindow:
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-60:]
             for line in lines:
+                account_match = re.search(r"account_id=([^\s]+)", line)
+                if account_match and account_match.group(1) != self.current_account_id:
+                    continue
+                if not account_match and self.current_account_id != DEFAULT_ACCOUNT_ID:
+                    continue
                 time_text, level, message = parse_persisted_log_line(line)
                 self._append_log(message, level, time_text=time_text)
         except OSError:
@@ -521,15 +611,17 @@ class MainWindow:
         online_published = (
             self.profile_snapshot.has_publication_on(date.today())
             if self.profile_snapshot
-            and self.profile_snapshot.profile_url == self.context.config.profile_url.rstrip("/")
+            and self.profile_snapshot.profile_url == self.current_account.profile_url.rstrip("/")
             else None
         )
-        if self.context.repository.has_successful_publication(date.today()) or online_published is True:
+        if self.context.repository.has_successful_publication(
+            date.today(), self.current_account_id
+        ) or online_published is True:
             allow = messagebox.askyesno("今天已经发布", "今天已有成功发布记录，仍要再生成并发布一篇吗？")
             if not allow:
                 return
         try:
-            pipeline = self.context.build_pipeline()
+            pipeline = self.context.build_pipeline(self.current_account_id)
         except Exception as exc:
             messagebox.showerror("无法开始", str(exc))
             return
@@ -541,13 +633,15 @@ class MainWindow:
         self.progressbar.configure(mode="indeterminate")
         self.progressbar.start(12)
         self.run_button.configure(state="disabled")
+        self.batch_button.configure(state="disabled")
         self.retry_button.configure(state="disabled")
         threading.Thread(target=self._run_worker, args=(pipeline, allow), daemon=True).start()
 
     def retry_latest_article(self) -> None:
         if self.running:
             return
-        path_text = self.context.repository.latest_article_path()
+        account_id = self.current_account_id
+        path_text = self.context.repository.latest_article_path(account_id)
         path = Path(path_text) if path_text else None
         if path is None or not path.exists():
             messagebox.showinfo("暂无文章", "没有找到可重新发布的已保存文章。")
@@ -566,42 +660,17 @@ class MainWindow:
         self.progressbar.start(12)
         self.run_button.configure(state="disabled")
         self.retry_button.configure(state="disabled")
-        threading.Thread(target=self._retry_worker, args=(path,), daemon=True).start()
+        self.batch_button.configure(state="disabled")
+        threading.Thread(target=self._retry_worker, args=(account_id, path), daemon=True).start()
 
-    def _retry_worker(self, path: Path) -> None:
-        run = None
+    def _retry_worker(self, account_id: str, path: Path) -> None:
         try:
-            with RunLock(app_data_dir() / "run.lock"):
-                markdown = path.read_text(encoding="utf-8")
-                document = parse_markdown(markdown)
-                article = Article(document.title, markdown, document.title)
-                run = self.context.repository.create_publish_retry(str(path))
-                self.queue.put(("progress", RunStatus.PUBLISHING, "正在重新填写 51CTO 编辑器，不调用大模型"))
-                result = self.context.publisher.publish(
-                    article,
-                    self.context.config.category,
-                    self.context.config.dry_run,
-                )
-                if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
-                    self.context.repository.update_run(
-                        run.id,
-                        result.status,
-                        error_code=None if result.status == RunStatus.PUBLISHED else "publish_failed",
-                        error_summary=result.message,
-                    )
-                else:
-                    self.context.repository.force_run_status(run.id, result.status)
-                result = PublishResult(
-                    result.status,
-                    url=result.url,
-                    message=result.message,
-                    article_path=str(path),
-                )
-        except AlreadyRunning as exc:
-            result = PublishResult(RunStatus.SKIPPED, message=str(exc), article_path=str(path))
+            result = self.context.retry_saved_article(
+                account_id,
+                path,
+                progress=lambda status, message: self.queue.put(("progress", status, message)),
+            )
         except Exception as exc:
-            if run is not None:
-                self.context.repository.force_run_status(run.id, RunStatus.FAILED)
             result = PublishResult(RunStatus.FAILED, message=str(exc), article_path=str(path))
         self.queue.put(("done", result))
 
@@ -613,6 +682,36 @@ class MainWindow:
         )
         self.queue.put(("done", result))
 
+    def open_batch_publish(self) -> None:
+        if self.running:
+            return
+        accounts = self.context.accounts(enabled_only=True)
+        if not accounts:
+            messagebox.showinfo("没有启用账号", "请先在账号管理中启用至少一个账号。")
+            return
+        BatchPublishDialog(self.root, accounts, self._start_batch)
+
+    def _start_batch(self, account_ids: list[str]) -> None:
+        self.running = True
+        self._clear_log()
+        self._show_log_view()
+        self.progress_var.set(f"批量任务已启动 · 共 {len(account_ids)} 个账号")
+        self.progressbar.configure(mode="determinate", value=0, maximum=max(1, len(account_ids)))
+        self.run_button.configure(state="disabled")
+        self.batch_button.configure(state="disabled")
+        self.retry_button.configure(state="disabled")
+        threading.Thread(target=self._batch_worker, args=(account_ids,), daemon=True).start()
+
+    def _batch_worker(self, account_ids: list[str]) -> None:
+        results = self.context.run_accounts(
+            account_ids,
+            Trigger.MANUAL,
+            progress=lambda account, status, message: self.queue.put(
+                ("batch_progress", account.display_name, status, message)
+            ),
+        )
+        self.queue.put(("batch_done", results))
+
     def _drain_queue(self) -> None:
         try:
             while True:
@@ -622,8 +721,20 @@ class MainWindow:
                     self.progress_var.set(f"{STATUS_TEXT.get(status, status.value)} · {message}")
                     tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
                     self._append_log(f"{STATUS_TEXT.get(status, status.value)}：{message}", tag)
+                elif event[0] == "batch_progress":
+                    _, account_name, status, message = event
+                    self.progress_var.set(
+                        f"{account_name} · {STATUS_TEXT.get(status, status.value)} · {message}"
+                    )
+                    tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
+                    self._append_log(
+                        f"[{account_name}] {STATUS_TEXT.get(status, status.value)}：{message}",
+                        tag,
+                    )
                 elif event[0] == "done":
                     self._finish_run(event[1])
+                elif event[0] == "batch_done":
+                    self._finish_batch(event[1])
                 elif event[0] == "runtime_status":
                     self._apply_runtime_status(*event[1:])
         except Empty:
@@ -635,6 +746,7 @@ class MainWindow:
         self.progressbar.stop()
         self.progressbar.configure(mode="determinate", value=100)
         self.run_button.configure(state="normal")
+        self.batch_button.configure(state="normal")
         self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
         self.refresh()
         if result.status == RunStatus.PUBLISHED:
@@ -646,6 +758,51 @@ class MainWindow:
             messagebox.showwarning("任务已停止", result.message or STATUS_TEXT[result.status])
         elif result.status == RunStatus.SKIPPED and result.article_path:
             messagebox.showinfo("安全试运行完成", f"文章已保存：\n{result.article_path}")
+
+    def _finish_batch(self, results: list[tuple[Account, PublishResult]]) -> None:
+        self.running = False
+        self.progressbar.stop()
+        self.progressbar.configure(mode="determinate", maximum=max(1, len(results)), value=len(results))
+        self.run_button.configure(state="normal")
+        self.batch_button.configure(state="normal")
+        self.retry_button.configure(state="normal")
+        success = sum(result.status == RunStatus.PUBLISHED for _account, result in results)
+        failed = sum(result.status in {RunStatus.FAILED, RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW} for _account, result in results)
+        skipped = len(results) - success - failed
+        self.progress_var.set(f"批量任务完成 · 成功 {success} · 失败/待处理 {failed} · 跳过 {skipped}")
+        self.refresh()
+        self._show_batch_summary(results)
+
+    def _show_batch_summary(self, results: list[tuple[Account, PublishResult]]) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("批量任务完成")
+        dialog.configure(background=COLORS["surface"])
+        dialog.transient(self.root)
+        content = ttk.Frame(dialog, style="Surface.TFrame", padding=(28, 24))
+        content.pack(fill="both", expand=True)
+        ttk.Label(content, text="批量任务已完成", style="DialogTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            content,
+            text="每个账号独立记录结果；失败账号不会导致其他账号重复执行。",
+            style="DialogText.TLabel",
+        ).pack(anchor="w", pady=(5, 16))
+        for account, result in results:
+            row = ttk.Frame(content, style="Card.TFrame", padding=(14, 10))
+            row.pack(fill="x", pady=(0, 8))
+            color = COLORS["success"] if result.status == RunStatus.PUBLISHED else COLORS["danger"] if result.status in {RunStatus.FAILED, RunStatus.UNKNOWN} else COLORS["warning"]
+            tk.Label(row, text="●", foreground=color, background=COLORS["surface"]).pack(side="left")
+            ttk.Label(row, text=account.display_name, style="CardValue.TLabel").pack(side="left", padx=(8, 0))
+            ttk.Label(row, text=STATUS_TEXT.get(result.status, result.status.value), style="CardDetail.TLabel").pack(side="right")
+        ttk.Button(content, text="完成", style="Primary.TButton", command=dialog.destroy).pack(
+            anchor="e", pady=(12, 0)
+        )
+        dialog.update_idletasks()
+        width, height = 520, max(300, 205 + len(results) * 58)
+        x = self.root.winfo_rootx() + max(10, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(10, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_force()
 
     def _show_publish_success(self, url: str | None) -> None:
         dialog = tk.Toplevel(self.root)
@@ -701,34 +858,36 @@ class MainWindow:
         dialog.focus_force()
 
     def open_profile(self) -> None:
-        url = self.context.config.profile_url or "https://blog.51cto.com/"
+        url = self.current_account.profile_url or "https://blog.51cto.com/"
         webbrowser.open(url)
         self.progress_var.set("已使用默认浏览器打开 51CTO")
 
     def open_login(self) -> None:
         try:
-            self.context.publisher.open_login()
-            self.progress_var.set("已打开自动发布专用窗口 · 只需在此登录一次")
-            self._append_log("已打开自动发布专用的 51CTO 登录窗口。")
+            self.context.publisher_for_account(self.current_account_id).open_login()
+            self.progress_var.set(f"已打开 {self.current_account.display_name} 的独立登录窗口")
+            self._append_log(f"已打开 {self.current_account.display_name} 的 51CTO 登录窗口。")
         except Exception as exc:
             messagebox.showerror("无法打开自动发布登录窗口", str(exc))
 
     def install_schedule(self) -> None:
         try:
-            self.context.scheduler.install(self.context.config.schedule_time)
+            accounts = self.context.accounts(enabled_only=True)
+            self.context.scheduler.install([account.schedule_time for account in accounts])
             self._start_runtime_status_refresh(force=True)
-            messagebox.showinfo("定时任务", f"已设置每天 {self.context.config.schedule_time:%H:%M} 自动执行")
+            details = "、".join(f"{account.display_name} {account.schedule_time:%H:%M}" for account in accounts)
+            messagebox.showinfo("定时任务", f"已更新多账号自动计划：\n{details}")
         except Exception as exc:
             messagebox.showerror("定时任务安装失败", str(exc))
 
     def open_latest_article(self) -> None:
-        path = self.context.repository.latest_article_path()
+        path = self.context.repository.latest_article_path(self.current_account_id)
         if path and Path(path).exists():
             os.startfile(path)
         else:
             messagebox.showinfo("暂无文章", "还没有可打开的已保存文章。")
 
     def open_generated_dir(self) -> None:
-        path = self.context.config.generated_dir
+        path = self.context.config_for_account(self.current_account_id).generated_dir
         path.mkdir(parents=True, exist_ok=True)
         os.startfile(path)

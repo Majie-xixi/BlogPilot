@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ctypes import Structure, byref, c_long, windll
-from datetime import time
 import sys
 import tkinter as tk
 from tkinter import BooleanVar, StringVar, Toplevel, messagebox, ttk
@@ -53,9 +52,6 @@ class SettingsDialog(Toplevel):
             "api_base_url": StringVar(value=cfg.api_base_url),
             "model": StringVar(value=cfg.model),
             "api_key": StringVar(value=self._saved_api_key),
-            "schedule": StringVar(value=cfg.schedule_time.strftime("%H:%M")),
-            "category": StringVar(value=cfg.category),
-            "profile_url": StringVar(value=cfg.profile_url),
             "dry_run": BooleanVar(value=cfg.dry_run),
             "show_key": BooleanVar(value=False),
         }
@@ -79,7 +75,7 @@ class SettingsDialog(Toplevel):
         ttk.Label(header, text="设置", style="DialogTitle.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="配置文章生成服务、每日运行时间和发布安全模式",
+            text="配置全局大模型服务和发布安全模式；账号信息在主界面单独管理",
             style="DialogText.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(5, 0))
 
@@ -149,37 +145,19 @@ class SettingsDialog(Toplevel):
         publish_card = ttk.Frame(self.scroll_content, style="Card.TFrame", padding=(20, 17))
         publish_card.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         publish_card.columnconfigure(0, weight=1)
-        ttk.Label(publish_card, text="自动发布", style="CardValue.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(publish_card, text="全局发布安全", style="CardValue.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             publish_card,
-            text="设置每日执行时间，以及 51CTO 活动对应的文章分类",
+            text="发布时间、主页、文章分类和内容方向由每个账号独立配置",
             style="CardDetail.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(3, 14))
 
-        fields = ttk.Frame(publish_card, style="Surface.TFrame")
-        fields.grid(row=2, column=0, sticky="ew")
-        fields.columnconfigure(0, weight=1)
-        fields.columnconfigure(1, weight=2)
-        ttk.Label(fields, text="每日时间（HH:MM）", style="Field.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(fields, text="51CTO AI 分类", style="Field.TLabel").grid(row=0, column=1, sticky="w", padx=(14, 0))
-        ttk.Entry(fields, textvariable=self.vars["schedule"], style="Modern.TEntry").grid(
-            row=1, column=0, sticky="ew", pady=(6, 0)
-        )
-        ttk.Entry(fields, textvariable=self.vars["category"], style="Modern.TEntry").grid(
-            row=1, column=1, sticky="ew", padx=(14, 0), pady=(6, 0)
-        )
-        ttk.Label(publish_card, text="目标 51CTO 博客主页（账号锁定）", style="Field.TLabel").grid(
-            row=3, column=0, sticky="w", pady=(14, 6)
-        )
-        ttk.Entry(publish_card, textvariable=self.vars["profile_url"], style="Modern.TEntry").grid(
-            row=4, column=0, sticky="ew"
-        )
         ttk.Checkbutton(
             publish_card,
             text="启用安全试运行（填写编辑器，但不点击最终发布）",
             variable=self.vars["dry_run"],
             style="Modern.TCheckbutton",
-        ).grid(row=5, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=2, column=0, sticky="w")
 
         footer = ttk.Frame(shell, style="Surface.TFrame", padding=(30, 14, 30, 20))
         footer.grid(row=2, column=0, sticky="ew")
@@ -259,16 +237,15 @@ class SettingsDialog(Toplevel):
 
     def _save(self) -> None:
         try:
-            hour, minute = self.vars["schedule"].get().strip().split(":", 1)
             old = self.context.config
             cfg = AppConfig(
                 history_dir=old.history_dir,
                 generated_dir=old.generated_dir,
-                schedule_time=time(int(hour), int(minute)),
+                schedule_time=old.schedule_time,
                 api_base_url=self.vars["api_base_url"].get().strip(),
                 model=self.vars["model"].get().strip(),
-                category=self.vars["category"].get().strip(),
-                profile_url=self.vars["profile_url"].get().strip().rstrip("/"),
+                category=old.category,
+                profile_url=old.profile_url,
                 dry_run=self.vars["dry_run"].get(),
                 min_chinese_chars=old.min_chinese_chars,
                 target_min_chars=old.target_min_chars,
@@ -282,7 +259,6 @@ class SettingsDialog(Toplevel):
             if api_key:
                 self.context.secrets.set_api_key(api_key)
             self.context.config = cfg
-            self.context.publisher.expected_profile_url = cfg.profile_url
             self.on_saved()
             self.destroy()
         except Exception as exc:

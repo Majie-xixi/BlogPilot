@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+from datetime import time
+import tkinter as tk
+from tkinter import messagebox, ttk
+import uuid
+
+from blogpost.application import ApplicationContext
+from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
+from blogpost.ui.theme import COLORS
+
+
+class AccountManagerDialog(tk.Toplevel):
+    def __init__(self, master, context: ApplicationContext, on_saved) -> None:
+        super().__init__(master)
+        self.context = context
+        self.on_saved = on_saved
+        self.current_id = DEFAULT_ACCOUNT_ID
+        self.title("账号管理")
+        self.configure(background=COLORS["surface"])
+        self.transient(master)
+        self.geometry(self._centered_geometry(900, 640))
+        self.minsize(820, 590)
+        self.vars = {
+            "display_name": tk.StringVar(),
+            "profile_url": tk.StringVar(),
+            "schedule": tk.StringVar(value="10:00"),
+            "monthly_target": tk.StringVar(value="21"),
+            "category": tk.StringVar(value="AI 智能体"),
+            "secondary_category": tk.StringVar(value="编程 Agent"),
+            "personal_category": tk.StringVar(value="AI"),
+            "content_directions": tk.StringVar(),
+            "keywords": tk.StringVar(),
+            "article_subdir": tk.StringVar(value="default"),
+            "enabled": tk.BooleanVar(value=True),
+        }
+        self._build()
+        self._reload(DEFAULT_ACCOUNT_ID)
+        self.grab_set()
+        self.focus_force()
+
+    def _centered_geometry(self, width: int, height: int) -> str:
+        self.update_idletasks()
+        x = self.master.winfo_rootx() + max(10, (self.master.winfo_width() - width) // 2)
+        y = self.master.winfo_rooty() + max(10, (self.master.winfo_height() - height) // 2)
+        return f"{width}x{height}+{x}+{y}"
+
+    def _build(self) -> None:
+        shell = ttk.Frame(self, style="Surface.TFrame", padding=(26, 22))
+        shell.pack(fill="both", expand=True)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(1, weight=1)
+        ttk.Label(shell, text="账号管理", style="DialogTitle.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(
+            shell,
+            text="账号信息、登录会话和文章目录均保存在本机；软件不会保存密码。",
+            style="DialogText.TLabel",
+        ).grid(row=0, column=1, sticky="e")
+
+        sidebar = ttk.Frame(shell, style="Card.TFrame", padding=(12, 12))
+        sidebar.grid(row=1, column=0, sticky="nsw", pady=(20, 0), padx=(0, 16))
+        sidebar.rowconfigure(0, weight=1)
+        self.tree = ttk.Treeview(sidebar, columns=("status",), show="tree headings", height=16)
+        self.tree.heading("#0", text="账号")
+        self.tree.heading("status", text="状态")
+        self.tree.column("#0", width=150, minwidth=130)
+        self.tree.column("status", width=62, minwidth=62, stretch=False, anchor="center")
+        self.tree.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self.tree.bind("<<TreeviewSelect>>", self._select)
+        ttk.Button(sidebar, text="新增账号", style="Primary.TButton", command=self._new).grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+
+        form = ttk.Frame(shell, style="Card.TFrame", padding=(22, 18))
+        form.grid(row=1, column=1, sticky="nsew", pady=(20, 0))
+        form.columnconfigure(0, weight=1)
+        form.columnconfigure(1, weight=1)
+        fields = (
+            ("账号显示名称", "display_name", 0, 0),
+            ("51CTO 博客主页", "profile_url", 0, 1),
+            ("每日发布时间", "schedule", 2, 0),
+            ("每月目标篇数", "monthly_target", 2, 1),
+            ("文章大分类", "category", 4, 0),
+            ("二级分类", "secondary_category", 4, 1),
+            ("个人分类", "personal_category", 6, 0),
+            ("文章保存子目录", "article_subdir", 6, 1),
+            ("内容方向", "content_directions", 8, 0),
+            ("主题关键词（可留空）", "keywords", 8, 1),
+        )
+        for label, name, row, column in fields:
+            ttk.Label(form, text=label, style="Field.TLabel").grid(
+                row=row, column=column, sticky="w", padx=(0 if column == 0 else 10, 10 if column == 0 else 0)
+            )
+            ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry").grid(
+                row=row + 1,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 10, 10 if column == 0 else 0),
+                pady=(6, 13),
+            )
+        ttk.Checkbutton(
+            form,
+            text="启用自动生成与发布",
+            variable=self.vars["enabled"],
+            style="Modern.TCheckbutton",
+        ).grid(row=10, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(
+            form,
+            text="每个账号使用独立 Chrome 登录环境；登录失效只暂停该账号。",
+            style="CardDetail.TLabel",
+        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        actions = ttk.Frame(form, style="Surface.TFrame")
+        actions.grid(row=12, column=0, columnspan=2, sticky="sew", pady=(20, 0))
+        actions.columnconfigure(0, weight=1)
+        ttk.Button(actions, text="关闭", style="Secondary.TButton", command=self.destroy).grid(
+            row=0, column=1
+        )
+        ttk.Button(actions, text="保存账号", style="Primary.TButton", command=self._save).grid(
+            row=0, column=2, padx=(10, 0)
+        )
+
+    def _reload(self, selected_id: str | None = None) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        accounts = self.context.accounts()
+        for account in accounts:
+            self.tree.insert(
+                "",
+                "end",
+                iid=account.id,
+                text=account.display_name,
+                values=("启用" if account.enabled else "停用",),
+            )
+        wanted = selected_id if selected_id in {a.id for a in accounts} else accounts[0].id
+        self.tree.selection_set(wanted)
+        self.tree.focus(wanted)
+        self._load_account(self.context.account(wanted))
+
+    def _select(self, _event=None) -> None:
+        selected = self.tree.selection()
+        if selected:
+            self._load_account(self.context.account(selected[0]))
+
+    def _load_account(self, account: Account) -> None:
+        self.current_id = account.id
+        values = {
+            "display_name": account.display_name,
+            "profile_url": account.profile_url,
+            "schedule": account.schedule_time.strftime("%H:%M"),
+            "monthly_target": str(account.monthly_target),
+            "category": account.category,
+            "secondary_category": account.secondary_category,
+            "personal_category": account.personal_category,
+            "content_directions": account.content_directions,
+            "keywords": account.keywords,
+            "article_subdir": account.article_subdir,
+            "enabled": account.enabled,
+        }
+        for name, value in values.items():
+            self.vars[name].set(value)
+
+    def _new(self) -> None:
+        if len(self.context.accounts()) >= 5:
+            messagebox.showinfo("账号数量已满", "最多可以配置 5 个账号。", parent=self)
+            return
+        token = uuid.uuid4().hex[:8]
+        self.current_id = f"account-{token}"
+        self.vars["display_name"].set(f"账号 {len(self.context.accounts()) + 1}")
+        self.vars["profile_url"].set("")
+        self.vars["schedule"].set("10:20")
+        self.vars["monthly_target"].set("21")
+        self.vars["category"].set("AI 智能体")
+        self.vars["secondary_category"].set("编程 Agent")
+        self.vars["personal_category"].set("AI")
+        self.vars["content_directions"].set("AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程")
+        self.vars["keywords"].set("")
+        self.vars["article_subdir"].set(self.current_id)
+        self.vars["enabled"].set(True)
+        self.tree.selection_remove(self.tree.selection())
+
+    def _save(self) -> None:
+        try:
+            hour_text, minute_text = self.vars["schedule"].get().strip().split(":", 1)
+            existing = {account.id: account for account in self.context.accounts()}
+            sort_order = existing.get(self.current_id).sort_order if self.current_id in existing else len(existing)
+            account = Account(
+                id=self.current_id,
+                display_name=self.vars["display_name"].get().strip(),
+                profile_url=self.vars["profile_url"].get().strip().rstrip("/"),
+                enabled=self.vars["enabled"].get(),
+                sort_order=sort_order,
+                schedule_time=time(int(hour_text), int(minute_text)),
+                monthly_target=int(self.vars["monthly_target"].get().strip()),
+                category=self.vars["category"].get().strip(),
+                secondary_category=self.vars["secondary_category"].get().strip(),
+                personal_category=self.vars["personal_category"].get().strip(),
+                content_directions=self.vars["content_directions"].get().strip(),
+                keywords=self.vars["keywords"].get().strip(),
+                article_subdir=self.vars["article_subdir"].get().strip(),
+            )
+            self.context.repository.save_account(account)
+            self._reload(account.id)
+            self.on_saved(account.id)
+        except Exception as exc:
+            messagebox.showerror("账号设置无效", str(exc), parent=self)
+
+
+class BatchPublishDialog(tk.Toplevel):
+    def __init__(self, master, accounts: list[Account], on_confirm) -> None:
+        super().__init__(master)
+        self.title("选择发布账号")
+        self.configure(background=COLORS["surface"])
+        self.transient(master)
+        self.resizable(False, False)
+        self.on_confirm = on_confirm
+        self.vars = {account.id: tk.BooleanVar(value=True) for account in accounts}
+        content = ttk.Frame(self, style="Surface.TFrame", padding=(28, 24))
+        content.pack(fill="both", expand=True)
+        ttk.Label(content, text="依次生成并发布", style="DialogTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            content,
+            text="所选账号将按顺序串行处理；某个账号失败后仍会继续下一个。",
+            style="DialogText.TLabel",
+        ).pack(anchor="w", pady=(5, 16))
+        for account in accounts:
+            row = ttk.Frame(content, style="Card.TFrame", padding=(14, 10))
+            row.pack(fill="x", pady=(0, 8))
+            ttk.Checkbutton(
+                row,
+                text=account.display_name,
+                variable=self.vars[account.id],
+                style="Modern.TCheckbutton",
+            ).pack(side="left")
+            ttk.Label(
+                row,
+                text=f"{account.schedule_time:%H:%M} · 目标 {account.monthly_target} 篇",
+                style="CardDetail.TLabel",
+            ).pack(side="right")
+        actions = ttk.Frame(content, style="Surface.TFrame")
+        actions.pack(fill="x", pady=(14, 0))
+        ttk.Button(actions, text="取消", style="Secondary.TButton", command=self.destroy).pack(side="right")
+        ttk.Button(actions, text="开始执行", style="Primary.TButton", command=self._confirm).pack(
+            side="right", padx=(0, 10)
+        )
+        self.update_idletasks()
+        width, height = 500, max(270, 190 + len(accounts) * 54)
+        x = master.winfo_rootx() + max(10, (master.winfo_width() - width) // 2)
+        y = master.winfo_rooty() + max(10, (master.winfo_height() - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.grab_set()
+        self.focus_force()
+
+    def _confirm(self) -> None:
+        selected = [account_id for account_id, variable in self.vars.items() if variable.get()]
+        if not selected:
+            messagebox.showinfo("请选择账号", "至少选择一个账号。", parent=self)
+            return
+        self.destroy()
+        self.on_confirm(selected)
