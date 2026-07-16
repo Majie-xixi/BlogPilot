@@ -4,6 +4,7 @@ from datetime import date, datetime
 import os
 from pathlib import Path
 from queue import Empty, Queue
+import re
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -31,6 +32,41 @@ STATUS_TEXT = {
     RunStatus.FAILED: "执行失败",
     RunStatus.UNKNOWN: "发布结果待确认",
 }
+
+
+def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
+    """Convert a plain file log into the same visual entry used for live logs."""
+    match = re.match(
+        r"^\d{4}-\d{2}-\d{2}T(?P<time>\d{2}:\d{2}:\d{2})\s+"
+        r"(?P<level>[A-Z]+)\s+\S+\s+(?P<body>.*)$",
+        line.strip(),
+    )
+    if not match:
+        return "--:--:--", "info", line.strip()
+
+    body = match.group("body")
+    status_match = re.search(r"(?:pipeline\s+)?status=([a-z_]+)", body)
+    status_value = status_match.group(1) if status_match else ""
+    message = body.partition(" message=")[2] if " message=" in body else body
+    if "pipeline started" in body:
+        trigger = "手动" if "trigger=manual" in body else "定时"
+        message = f"任务已启动 · {trigger}触发"
+    elif status_value:
+        try:
+            status = RunStatus(status_value)
+            message = f"{STATUS_TEXT.get(status, status.value)}：{message}"
+        except ValueError:
+            pass
+
+    if match.group("level") in {"ERROR", "CRITICAL"} or status_value == RunStatus.FAILED.value:
+        visual_level = "error"
+    elif status_value in {RunStatus.NEEDS_REVIEW.value, RunStatus.UNKNOWN.value}:
+        visual_level = "warning"
+    elif status_value in {RunStatus.PUBLISHED.value, RunStatus.SKIPPED.value}:
+        visual_level = "success"
+    else:
+        visual_level = "info"
+    return match.group("time"), visual_level, message
 
 
 class MainWindow:
@@ -178,6 +214,9 @@ class MainWindow:
         self.log_text.tag_configure("success_badge", foreground=COLORS["success"], font=("Cascadia Mono", 9, "bold"))
         self.log_text.tag_configure("warning_badge", foreground=COLORS["warning"], font=("Cascadia Mono", 9, "bold"))
         self.log_text.tag_configure("error_badge", foreground=COLORS["danger"], font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("keyword_51cto", foreground="#0369A1", font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("keyword_deepseek", foreground="#7C3AED", font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("keyword_markdown", foreground="#A16207", font=("Cascadia Mono", 9, "bold"))
 
         self.history_view.columnconfigure(0, weight=1)
         self.history_view.rowconfigure(0, weight=1)
@@ -283,14 +322,20 @@ class MainWindow:
             return
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-60:]
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", "\n".join(lines) + "\n", "muted")
-            self.log_text.configure(state="disabled")
-            self.log_text.see("end")
+            for line in lines:
+                time_text, level, message = parse_persisted_log_line(line)
+                self._append_log(message, level, time_text=time_text)
         except OSError:
             self._append_log("无法读取历史日志，但不影响运行。", "warning", timestamp=False)
 
-    def _append_log(self, message: str, tag: str | None = None, *, timestamp: bool = True) -> None:
+    def _append_log(
+        self,
+        message: str,
+        tag: str | None = None,
+        *,
+        timestamp: bool = True,
+        time_text: str | None = None,
+    ) -> None:
         self.log_text.configure(state="normal")
         if timestamp:
             level = tag if tag in {"success", "warning", "error"} else "info"
@@ -300,13 +345,26 @@ class MainWindow:
                 "warning": "WARN",
                 "error": "ERROR",
             }[level]
-            self.log_text.insert("end", f"{datetime.now():%H:%M:%S} ", "time")
+            display_time = time_text or f"{datetime.now():%H:%M:%S}"
+            self.log_text.insert("end", display_time + " ", "time")
             self.log_text.insert("end", f"[{badge}] ", f"{level}_badge")
-            self.log_text.insert("end", message.rstrip() + "\n")
+            self._insert_log_message(message.rstrip())
+            self.log_text.insert("end", "\n")
         else:
             self.log_text.insert("end", message.rstrip() + "\n", tag or "")
         self.log_text.configure(state="disabled")
         self.log_text.see("end")
+
+    def _insert_log_message(self, message: str) -> None:
+        keyword_tags = {
+            "51CTO": "keyword_51cto",
+            "DeepSeek": "keyword_deepseek",
+            "Markdown": "keyword_markdown",
+        }
+        pattern = re.compile("(" + "|".join(map(re.escape, keyword_tags)) + ")")
+        for part in pattern.split(message):
+            if part:
+                self.log_text.insert("end", part, keyword_tags.get(part, ""))
 
     def _clear_log(self) -> None:
         self.log_text.configure(state="normal")
