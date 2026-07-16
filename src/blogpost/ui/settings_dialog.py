@@ -55,6 +55,7 @@ class SettingsDialog(Toplevel):
             "api_key": StringVar(value=self._saved_api_key),
             "schedule": StringVar(value=cfg.schedule_time.strftime("%H:%M")),
             "category": StringVar(value=cfg.category),
+            "profile_url": StringVar(value=cfg.profile_url),
             "dry_run": BooleanVar(value=cfg.dry_run),
             "show_key": BooleanVar(value=False),
         }
@@ -167,12 +168,18 @@ class SettingsDialog(Toplevel):
         ttk.Entry(fields, textvariable=self.vars["category"], style="Modern.TEntry").grid(
             row=1, column=1, sticky="ew", padx=(14, 0), pady=(6, 0)
         )
+        ttk.Label(publish_card, text="目标 51CTO 博客主页（账号锁定）", style="Field.TLabel").grid(
+            row=3, column=0, sticky="w", pady=(14, 6)
+        )
+        ttk.Entry(publish_card, textvariable=self.vars["profile_url"], style="Modern.TEntry").grid(
+            row=4, column=0, sticky="ew"
+        )
         ttk.Checkbutton(
             publish_card,
             text="启用安全试运行（填写编辑器，但不点击最终发布）",
             variable=self.vars["dry_run"],
             style="Modern.TCheckbutton",
-        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=5, column=0, sticky="w", pady=(16, 0))
 
         footer = ttk.Frame(shell, style="Surface.TFrame", padding=(30, 14, 30, 20))
         footer.grid(row=2, column=0, sticky="ew")
@@ -261,6 +268,7 @@ class SettingsDialog(Toplevel):
                 api_base_url=self.vars["api_base_url"].get().strip(),
                 model=self.vars["model"].get().strip(),
                 category=self.vars["category"].get().strip(),
+                profile_url=self.vars["profile_url"].get().strip().rstrip("/"),
                 dry_run=self.vars["dry_run"].get(),
                 min_chinese_chars=old.min_chinese_chars,
                 target_min_chars=old.target_min_chars,
@@ -274,6 +282,7 @@ class SettingsDialog(Toplevel):
             if api_key:
                 self.context.secrets.set_api_key(api_key)
             self.context.config = cfg
+            self.context.publisher.expected_profile_url = cfg.profile_url
             self.on_saved()
             self.destroy()
         except Exception as exc:

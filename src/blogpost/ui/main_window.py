@@ -161,7 +161,7 @@ class MainWindow:
             selectbackground=COLORS["primary_soft"],
             relief="flat",
             borderwidth=0,
-            font=(FONT, 9),
+            font=("Cascadia Mono", 9),
             padx=14,
             pady=12,
         )
@@ -173,6 +173,11 @@ class MainWindow:
         self.log_text.tag_configure("warning", foreground=COLORS["warning"])
         self.log_text.tag_configure("error", foreground=COLORS["danger"])
         self.log_text.tag_configure("muted", foreground=COLORS["muted"])
+        self.log_text.tag_configure("time", foreground=COLORS["muted"])
+        self.log_text.tag_configure("info_badge", foreground="#0369A1", font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("success_badge", foreground=COLORS["success"], font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("warning_badge", foreground=COLORS["warning"], font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("error_badge", foreground=COLORS["danger"], font=("Cascadia Mono", 9, "bold"))
 
         self.history_view.columnconfigure(0, weight=1)
         self.history_view.rowconfigure(0, weight=1)
@@ -286,9 +291,20 @@ class MainWindow:
             self._append_log("无法读取历史日志，但不影响运行。", "warning", timestamp=False)
 
     def _append_log(self, message: str, tag: str | None = None, *, timestamp: bool = True) -> None:
-        prefix = f"[{datetime.now():%H:%M:%S}] " if timestamp else ""
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", prefix + message.rstrip() + "\n", tag or "")
+        if timestamp:
+            level = tag if tag in {"success", "warning", "error"} else "info"
+            badge = {
+                "info": "INFO",
+                "success": "DONE",
+                "warning": "WARN",
+                "error": "ERROR",
+            }[level]
+            self.log_text.insert("end", f"{datetime.now():%H:%M:%S} ", "time")
+            self.log_text.insert("end", f"[{badge}] ", f"{level}_badge")
+            self.log_text.insert("end", message.rstrip() + "\n")
+        else:
+            self.log_text.insert("end", message.rstrip() + "\n", tag or "")
         self.log_text.configure(state="disabled")
         self.log_text.see("end")
 
@@ -417,7 +433,7 @@ class MainWindow:
                 if event[0] == "progress":
                     _, status, message = event
                     self.progress_var.set(f"{STATUS_TEXT.get(status, status.value)} · {message}")
-                    tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else None
+                    tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
                     self._append_log(f"{STATUS_TEXT.get(status, status.value)}：{message}", tag)
                 elif event[0] == "done":
                     self._finish_run(event[1])
@@ -432,9 +448,8 @@ class MainWindow:
         self.run_button.configure(state="normal")
         self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
         self.refresh()
-        if result.status == RunStatus.PUBLISHED and result.url:
-            if messagebox.askyesno("发布成功", "文章已发布，是否立即打开？"):
-                webbrowser.open(result.url)
+        if result.status == RunStatus.PUBLISHED:
+            self._show_publish_success(result.url)
         elif result.status == RunStatus.NEEDS_REVIEW and result.article_path:
             if messagebox.askyesno("文章需要检查", f"{result.message}\n\n草稿已经保存，是否立即打开？"):
                 os.startfile(result.article_path)
@@ -442,6 +457,59 @@ class MainWindow:
             messagebox.showwarning("任务已停止", result.message or STATUS_TEXT[result.status])
         elif result.status == RunStatus.SKIPPED and result.article_path:
             messagebox.showinfo("安全试运行完成", f"文章已保存：\n{result.article_path}")
+
+    def _show_publish_success(self, url: str | None) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("发布成功")
+        dialog.configure(background=COLORS["surface"])
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        content = tk.Frame(dialog, background=COLORS["surface"], padx=30, pady=26)
+        content.pack(fill="both", expand=True)
+        tk.Label(
+            content,
+            text="✓",
+            foreground=COLORS["success"],
+            background=COLORS["primary_soft"],
+            font=(FONT, 22, "bold"),
+            width=3,
+            height=1,
+        ).pack(anchor="w")
+        tk.Label(
+            content,
+            text="文章发布成功",
+            foreground=COLORS["text"],
+            background=COLORS["surface"],
+            font=(FONT, 17, "bold"),
+        ).pack(anchor="w", pady=(16, 6))
+        tk.Label(
+            content,
+            text="51CTO 已确认提交完成，软件不会重复发布。",
+            foreground=COLORS["muted"],
+            background=COLORS["surface"],
+            font=(FONT, 9),
+        ).pack(anchor="w")
+
+        actions = tk.Frame(content, background=COLORS["surface"])
+        actions.pack(fill="x", pady=(24, 0))
+        ttk.Button(actions, text="稍后", style="Secondary.TButton", command=dialog.destroy).pack(side="right")
+        if url:
+            def open_article() -> None:
+                dialog.destroy()
+                webbrowser.open(url)
+
+            ttk.Button(actions, text="打开文章", style="Primary.TButton", command=open_article).pack(
+                side="right", padx=(0, 10)
+            )
+
+        dialog.update_idletasks()
+        width, height = 440, 270
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_force()
 
     def open_login(self) -> None:
         try:

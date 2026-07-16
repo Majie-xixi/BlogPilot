@@ -4,7 +4,7 @@ import unittest
 
 from blogpost.browser.chrome import ChromeController, find_chrome
 from blogpost.browser.websocket import encode_text_frame
-from blogpost.publishers.cto51 import build_fill_script
+from blogpost.publishers.cto51 import build_fill_script, build_settings_script
 
 
 class ChromeTests(unittest.TestCase):
@@ -36,3 +36,10 @@ class ChromeTests(unittest.TestCase):
         self.assertIn("AI 智能体", script)
         self.assertIn("Object.getOwnPropertyDescriptor", script)
         self.assertIn("textarea.write-area", script)
+
+    def test_settings_script_selects_article_and_personal_categories(self):
+        script = build_settings_script("AI 智能体")
+        self.assertIn("编程 Agent", script)
+        self.assertIn("#selfType", script)
+        self.assertIn("personalOk", script)
+        self.assertIn("secondaryOk", script)

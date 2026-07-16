@@ -35,6 +35,7 @@ class AppConfig:
     api_base_url: str = DEFAULT_API_BASE_URL
     model: str = DEFAULT_MODEL
     category: str = "AI 智能体"
+    profile_url: str = ""
     dry_run: bool = True
     min_chinese_chars: int = 800
     target_min_chars: int = 1500
@@ -59,6 +60,8 @@ class AppConfig:
             raise ConfigError("API base URL is required")
         if self.min_chinese_chars < 401:
             raise ConfigError("minimum article length must exceed 400")
+        if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
+            raise ConfigError("51CTO profile URL must look like https://blog.51cto.com/u_123456")
 
     def to_json_dict(self) -> dict[str, Any]:
         data = asdict(self)

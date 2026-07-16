@@ -66,7 +66,7 @@ def build_context() -> ApplicationContext:
     repository = Repository(database)
     secrets = DpapiSecretStore(app_data_dir() / "api-key.bin")
     chrome = ChromeController(find_chrome(), browser_profile_dir())
-    publisher = Cto51Publisher(chrome, app_data_dir() / "diagnostics")
+    publisher = Cto51Publisher(chrome, app_data_dir() / "diagnostics", config.profile_url)
     if getattr(sys, "frozen", False):
         executable = Path(sys.executable)
         arguments = "run-daily"

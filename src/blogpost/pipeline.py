@@ -64,10 +64,15 @@ class PublishingPipeline:
             with self.run_lock:
                 run = self.repository.create_run(trigger)
                 logger.info("pipeline started run_id=%s trigger=%s", run.id, trigger.value)
-                if self.repository.has_successful_publication(date.today()) and not allow_same_day:
+                local_published = self.repository.has_successful_publication(date.today())
+                online_check = getattr(self.publisher, "has_publication_on", None)
+                online_published = online_check(date.today()) if callable(online_check) and not local_published else False
+                if (local_published or online_published is True) and not allow_same_day:
                     self.repository.update_run(run.id, RunStatus.SKIPPED)
-                    emit(RunStatus.SKIPPED, "今天已经成功发布，已跳过")
-                    return PublishResult(RunStatus.SKIPPED, message="今天已经成功发布")
+                    source = "51CTO 线上" if online_published is True else "软件记录"
+                    message = f"{source}显示今天已经发布，已跳过且不会调用大模型"
+                    emit(RunStatus.SKIPPED, message)
+                    return PublishResult(RunStatus.SKIPPED, message=message)
                 try:
                     corpus = self.corpus_indexer.scan_history() + self.corpus_indexer.scan_generated()
                     self.repository.update_run(run.id, RunStatus.PLANNING)

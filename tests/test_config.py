@@ -14,7 +14,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.schedule_time, time(10, 0))
         self.assertEqual(cfg.api_base_url, "https://api.deepseek.com")
         self.assertEqual(cfg.model, "deepseek-v4-pro")
+        self.assertEqual(cfg.profile_url, "")
         self.assertTrue(cfg.dry_run)
+
+    def test_profile_url_is_validated(self):
+        cfg = AppConfig(profile_url="https://example.com/not-51cto")
+        with self.assertRaisesRegex(ConfigError, "profile URL"):
+            cfg.validate_for_run()
 
     def test_legacy_deepseek_defaults_are_migrated(self):
         cfg = AppConfig.from_json_dict(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 import json
 from pathlib import Path
 import time
@@ -12,6 +13,7 @@ from blogpost.publishers.diagnostics import save_diagnostic
 
 
 PUBLISH_URL = "https://blog.51cto.com/blogger/publish"
+HOME_URL = "https://blog.51cto.com/"
 
 
 def build_fill_script(title: str, markdown: str, category: str = "") -> str:
@@ -50,17 +52,41 @@ return true;
 })()"""
 
 
-def build_settings_script(category: str) -> str:
+def build_settings_script(
+    category: str,
+    secondary_category: str = "编程 Agent",
+    personal_category: str = "AI",
+) -> str:
     category_json = json.dumps(category, ensure_ascii=False)
-    return f"""(() => {{
-const category={category_json};
+    secondary_json = json.dumps(secondary_category, ensure_ascii=False)
+    personal_json = json.dumps(personal_category, ensure_ascii=False)
+    return f"""(async () => {{
+const category={category_json}, secondary={secondary_json}, personal={personal_json};
 const visible=(el)=>!!el&&el.offsetParent!==null;
+const pause=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
 const exact=(text)=>[...document.querySelectorAll('label,button,li,span,div')]
   .filter(el=>visible(el)&&el.textContent.trim()===text)
   .sort((a,b)=>a.childElementCount-b.childElementCount)[0];
-let categoryOk=false;
-const categoryNode=exact(category);
-if(categoryNode){{categoryNode.click();categoryOk=true;}}
+const clickChoice=(selector,text)=>{{
+  const item=[...document.querySelectorAll(selector)].find(el=>visible(el)&&el.textContent.trim()===text);
+  if(!item)return false;
+  item.click();
+  return true;
+}};
+if(![...document.querySelectorAll('.select_item_check')].some(el=>el.textContent.trim()===category)){{
+  clickChoice('.select_item',category);
+  await pause(180);
+}}
+let selectedSecondary=[...document.querySelectorAll('.second-types-item-check')].find(visible);
+if(!selectedSecondary){{
+  const secondaryItems=[...document.querySelectorAll('.second-types-item')].filter(visible);
+  const wanted=secondaryItems.find(el=>el.textContent.trim()===secondary)||secondaryItems[0];
+  if(wanted){{wanted.click();await pause(120);}}
+}}
+const personalInput=document.querySelector('#selfType');
+const categoryOk=[...document.querySelectorAll('.select_item_check')].some(el=>el.textContent.trim()===category);
+const secondaryOk=!document.querySelector('.second-types-item')||!![...document.querySelectorAll('.second-types-item-check')].find(visible);
+const personalOk=!!personalInput&&personalInput.value.trim()===personal;
 const typeInput=[...document.querySelectorAll('input')].find(el=>visible(el)&&(el.placeholder||'').includes('文章类型'));
 let originalOk=!!typeInput && (typeInput.value||'').includes('原创');
 if(typeInput&&!originalOk){{
@@ -69,7 +95,7 @@ if(typeInput&&!originalOk){{
   if(original){{original.click();originalOk=true;}}
 }}
 const release=[...document.querySelectorAll('button.release')].find(visible);
-return {{categoryOk,originalOk,releaseReady:!!release,typeValue:typeInput?.value||'',url:location.href}};
+return {{categoryOk,secondaryOk,personalOk,originalOk,releaseReady:!!release,typeValue:typeInput?.value||'',personalValue:personalInput?.value||'',url:location.href}};
 }})()"""
 
 
@@ -77,12 +103,64 @@ return {{categoryOk,originalOk,releaseReady:!!release,typeValue:typeInput?.value
 class Cto51Publisher:
     chrome: ChromeController
     diagnostic_dir: Path
+    expected_profile_url: str = ""
 
     def open_login(self) -> None:
         self.chrome.start("https://blog.51cto.com/login")
 
+    def has_publication_on(self, day: date) -> bool | None:
+        """Check the logged-in user's newest public article date.
+
+        ``None`` means the online state could not be verified; callers can then
+        safely fall back to their local publication record.
+        """
+        try:
+            profile_url = self.expected_profile_url.rstrip("/") or self._current_profile_url()
+            if not profile_url:
+                return None
+
+            if self.chrome.port is None:
+                self.chrome.start(profile_url)
+                profile_target = self.chrome.wait_for_target(profile_url)
+            else:
+                profile_target = self.chrome.open_tab(profile_url)
+            with CdpSession(profile_target["webSocketDebuggerUrl"]) as session:
+                self._wait_page_content(session, profile_url)
+                article_url = self._wait_for_value(
+                    session,
+                    "document.querySelector('#common-article-listbox-1 .common-article-list .title a[href]')?.href||''",
+                )
+            if not article_url:
+                return False
+
+            article_target = self.chrome.open_tab(article_url)
+            with CdpSession(article_target["webSocketDebuggerUrl"]) as session:
+                self._wait_page_content(session, article_url)
+                published_at = self._wait_for_value(
+                    session,
+                    "document.querySelector('time[pubdate]')?.getAttribute('pubdate')||document.querySelector('time[pubdate]')?.textContent.trim()||''",
+                )
+            if not published_at:
+                return None
+            return datetime.fromisoformat(published_at.strip()).date() == day
+        except Exception:
+            return None
+
     def publish(self, article: Article, category: str, dry_run: bool) -> PublishResult:
         try:
+            if self.expected_profile_url:
+                current_profile = self._current_profile_url()
+                expected = self.expected_profile_url.rstrip("/")
+                if not current_profile:
+                    return PublishResult(
+                        RunStatus.FAILED,
+                        message=f"无法确认 51CTO 登录账号；目标账号：{expected}，请重新登录",
+                    )
+                if current_profile.rstrip("/") != expected:
+                    return PublishResult(
+                        RunStatus.FAILED,
+                        message=f"51CTO 账号不匹配，已停止发布。当前：{current_profile}；目标：{expected}",
+                    )
             if self.chrome.port is None:
                 # start() already opens the URL; reuse it instead of creating a duplicate tab.
                 self.chrome.start(PUBLISH_URL)
@@ -112,13 +190,36 @@ class Cto51Publisher:
                     return self._diagnostic_failure(session, "找不到“发布文章”设置按钮")
                 self._wait_publish_dialog(session)
                 settings = session.evaluate(build_settings_script(category)) or {}
-                if not all((settings.get("categoryOk"), settings.get("originalOk"), settings.get("releaseReady"))):
-                    return self._diagnostic_failure(session, "51CTO 发布设置未识别完整")
+                if not settings.get("personalOk"):
+                    settings["personalOk"] = self._select_personal_category(session, "AI")
+                required = (
+                    settings.get("categoryOk"),
+                    settings.get("secondaryOk"),
+                    settings.get("personalOk"),
+                    settings.get("originalOk"),
+                    settings.get("releaseReady"),
+                )
+                if not all(required):
+                    missing = [
+                        name
+                        for name, ok in (
+                            ("文章分类", settings.get("categoryOk")),
+                            ("二级分类", settings.get("secondaryOk")),
+                            ("个人分类", settings.get("personalOk")),
+                            ("文章类型", settings.get("originalOk")),
+                            ("发布按钮", settings.get("releaseReady")),
+                        )
+                        if not ok
+                    ]
+                    return self._diagnostic_failure(
+                        session,
+                        f"51CTO 发布设置未完成：{'、'.join(missing)}",
+                    )
 
                 if dry_run:
                     return PublishResult(
                         RunStatus.SKIPPED,
-                        message="安全试运行已填写文章并打开发布设置，未点击最终发布",
+                        message="安全试运行已填写文章、文章分类和个人分类，未点击最终发布",
                     )
 
                 clicked = session.evaluate(
@@ -131,6 +232,22 @@ class Cto51Publisher:
             return PublishResult(RunStatus.FAILED, message=str(exc))
         except Exception as exc:
             return PublishResult(RunStatus.FAILED, message=f"51CTO 发布失败：{exc}")
+
+    def _current_profile_url(self) -> str:
+        if self.chrome.port is None:
+            self.chrome.start(HOME_URL)
+            target = self.chrome.wait_for_target(HOME_URL)
+        else:
+            target = self.chrome.open_tab(HOME_URL)
+        websocket_url = target.get("webSocketDebuggerUrl")
+        if not websocket_url:
+            return ""
+        with CdpSession(websocket_url) as session:
+            self._wait_page_content(session, HOME_URL)
+            value = session.evaluate(
+                "[...document.querySelectorAll('a[href]')].find(a=>a.textContent.trim()==='我的博客'&&/\\/u_\\d+\\/?$/.test(a.href))?.href||''"
+            )
+        return value if isinstance(value, str) else ""
 
     @staticmethod
     def _wait_editor_stable(session: CdpSession, timeout: float = 20) -> None:
@@ -155,6 +272,32 @@ class Cto51Publisher:
         raise TimeoutError(f"51CTO 编辑器加载超时：{url}")
 
     @staticmethod
+    def _wait_page_content(session: CdpSession, url_prefix: str, timeout: float = 15) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = session.evaluate(
+                "({url:location.href,ready:document.readyState,text:(document.body?.innerText||'').length})"
+            ) or {}
+            if (
+                str(state.get("url", "")).startswith(url_prefix)
+                and state.get("ready") in {"interactive", "complete"}
+                and int(state.get("text", 0)) > 100
+            ):
+                return
+            time.sleep(0.2)
+        raise TimeoutError(f"51CTO 页面加载超时：{url_prefix}")
+
+    @staticmethod
+    def _wait_for_value(session: CdpSession, expression: str, timeout: float = 12) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = session.evaluate(expression)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            time.sleep(0.2)
+        return ""
+
+    @staticmethod
     def _fill_and_verify(session: CdpSession, article: Article) -> dict:
         result: dict = {}
         for _ in range(2):
@@ -176,6 +319,57 @@ class Cto51Publisher:
                 return
             time.sleep(0.2)
         raise TimeoutError("51CTO 发布设置窗口打开超时")
+
+    @classmethod
+    def _select_personal_category(
+        cls,
+        session: CdpSession,
+        category: str,
+        timeout: float = 5,
+    ) -> bool:
+        category_json = json.dumps(category, ensure_ascii=False)
+        if session.evaluate(
+            f"document.querySelector('#selfType')?.value.trim()==={category_json}"
+        ):
+            return True
+        option_expression = (
+            "[...document.querySelectorAll('#selfType_list li')]"
+            f".find(el=>el.offsetParent!==null&&el.textContent.trim()==={category_json})"
+        )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not session.evaluate(f"!!({option_expression})"):
+                if not cls._click_center(session, "document.querySelector('#selfType')"):
+                    return False
+                time.sleep(0.5)
+            if cls._click_center(session, option_expression):
+                time.sleep(0.4)
+            if session.evaluate(
+                f"document.querySelector('#selfType')?.value.trim()==={category_json}"
+            ):
+                return True
+            time.sleep(0.2)
+        return False
+
+    @staticmethod
+    def _click_center(session: CdpSession, element_expression: str) -> bool:
+        point = session.evaluate(
+            f"(() => {{const el={element_expression};"
+            "if(!el||el.offsetParent===null)return null;"
+            "const r=el.getBoundingClientRect();"
+            "return {x:r.left+r.width/2,y:r.top+r.height/2};})()"
+        )
+        if not isinstance(point, dict):
+            return False
+        params = {
+            "x": point["x"],
+            "y": point["y"],
+            "button": "left",
+            "clickCount": 1,
+        }
+        session.command("Input.dispatchMouseEvent", {"type": "mousePressed", **params})
+        session.command("Input.dispatchMouseEvent", {"type": "mouseReleased", **params})
+        return True
 
     @staticmethod
     def _wait_publish_result(session: CdpSession, timeout: float = 12) -> PublishResult:
