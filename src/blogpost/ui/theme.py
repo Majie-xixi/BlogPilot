@@ -148,6 +148,22 @@ def configure_theme(root: tk.Tk) -> None:
         foreground=[("disabled", "#F2FBF8")],
     )
     style.configure(
+        "HeroSecondary.TButton",
+        background=COLORS["surface"],
+        foreground=COLORS["primary"],
+        bordercolor=COLORS["primary"],
+        lightcolor=COLORS["primary"],
+        darkcolor=COLORS["primary"],
+        borderwidth=1,
+        padding=(20, 10),
+        font=(FONT, 10, "bold"),
+    )
+    style.map(
+        "HeroSecondary.TButton",
+        background=[("active", COLORS["primary_soft"]), ("disabled", COLORS["surface_alt"])],
+        foreground=[("disabled", COLORS["subtle"])],
+    )
+    style.configure(
         "Secondary.TButton",
         background=COLORS["surface"],
         foreground=COLORS["text"],

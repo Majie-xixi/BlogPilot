@@ -168,10 +168,10 @@ class MainWindow:
         self.batch_button = ttk.Button(
             hero_actions,
             text="批量依次发布",
-            style="Secondary.TButton",
+            style="HeroSecondary.TButton",
             command=self.open_batch_publish,
         )
-        self.batch_button.grid(row=1, column=0, sticky="ew", pady=(7, 0))
+        self.batch_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.progressbar = ttk.Progressbar(
             hero,
             mode="determinate",
@@ -182,17 +182,22 @@ class MainWindow:
 
         actions = ttk.Frame(page, style="Page.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(14, 18))
-        for column in range(3):
+        for column in range(6):
             actions.columnconfigure(column, weight=1, uniform="actions")
         for row, column, text, command in (
             (0, 0, "打开 51CTO", self.open_profile),
             (0, 1, "自动发布登录", self.open_login),
-            (0, 2, "安装 / 更新每日任务", self.install_schedule),
-            (1, 0, "打开最近文章", self.open_latest_article),
-            (1, 1, "打开文章目录", self.open_generated_dir),
+            (0, 2, "更新每日任务", self.install_schedule),
+            (0, 3, "打开最近文章", self.open_latest_article),
+            (0, 4, "打开文章目录", self.open_generated_dir),
         ):
             button = ttk.Button(actions, text=text, style="Secondary.TButton", command=command)
-            button.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 5, 0 if column == 2 else 5), pady=(0 if row == 0 else 8, 0))
+            button.grid(
+                row=row,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 4, 0 if column == 5 else 4),
+            )
             if text == "打开最近文章":
                 self.latest_article_button = button
 
@@ -202,7 +207,7 @@ class MainWindow:
             style="Secondary.TButton",
             command=self.retry_latest_article,
         )
-        self.retry_button.grid(row=1, column=2, sticky="ew", padx=(5, 0), pady=(8, 0))
+        self.retry_button.grid(row=0, column=5, sticky="ew", padx=(4, 0))
 
         section = ttk.Frame(page, style="Page.TFrame")
         section.grid(row=4, column=0, sticky="ew", pady=(0, 7))
