@@ -20,6 +20,8 @@ class ProfileSnapshot:
     checked_at: datetime
     latest_published_at: datetime | None
     month_count: int | None
+    latest_title: str | None
+    latest_url: str | None
 
     def has_publication_on(self, day: date) -> bool | None:
         if self.latest_published_at is None:
@@ -43,7 +45,19 @@ def parse_profile_html(
         re.IGNORECASE | re.DOTALL,
     )
     latest_text = None
+    latest_title = None
+    latest_url = None
     if article_box:
+        article = re.search(
+            r'<div[^>]*class=["\'][^"\']*\bcommon-article-list\b[^"\']*["\'][^>]*>.*?'
+            r'<h3[^>]*class=["\'][^"\']*\btitle\b[^"\']*["\'][^>]*>\s*'
+            r'<a[^>]+href=["\'](?P<url>[^"\']+)["\'][^>]*>(?P<title>.*?)</a>',
+            article_box.group("body"),
+            re.IGNORECASE | re.DOTALL,
+        )
+        if article:
+            latest_title = _plain_text(article.group("title")) or None
+            latest_url = unescape(article.group("url")).strip() or None
         action = re.search(
             r'<span[^>]*class=["\'][^"\']*\bactions\b[^"\']*["\'][^>]*>(.*?)</span>',
             article_box.group("body"),
@@ -68,6 +82,8 @@ def parse_profile_html(
         checked_at=checked_at,
         latest_published_at=parse_51cto_time(latest_text, checked_at) if latest_text else None,
         month_count=int(month_match.group(1)) if month_match else None,
+        latest_title=latest_title,
+        latest_url=latest_url,
     )
 
 

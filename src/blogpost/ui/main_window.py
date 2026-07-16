@@ -34,6 +34,12 @@ STATUS_TEXT = {
     RunStatus.UNKNOWN: "发布结果待确认",
 }
 
+TRIGGER_TEXT = {
+    Trigger.MANUAL: "手动",
+    Trigger.SCHEDULED: "定时",
+    Trigger.SYNCED: "线上同步",
+}
+
 
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
@@ -287,6 +293,10 @@ class MainWindow:
             self.mode_value_var.set("真实发布")
             self.mode_detail_var.set("检查通过后自动提交到 51CTO")
 
+        self._refresh_history()
+        self._start_runtime_status_refresh()
+
+    def _refresh_history(self) -> None:
         for item in self.tree.get_children():
             self.tree.delete(item)
         runs = list(self.context.repository.recent_runs(30))
@@ -307,7 +317,7 @@ class MainWindow:
                 "end",
                 values=(
                     run.started_at.strftime("%Y-%m-%d %H:%M"),
-                    "手动" if run.trigger == Trigger.MANUAL else "定时",
+                    TRIGGER_TEXT.get(run.trigger, run.trigger.value),
                     STATUS_TEXT.get(run.status, run.status.value),
                     run.error_summary or "—",
                 ),
@@ -318,7 +328,6 @@ class MainWindow:
         self.retry_button.configure(
             state="normal" if latest and Path(latest).exists() and not self.running else "disabled"
         )
-        self._start_runtime_status_refresh()
 
     def _render_publication_status(self, error: str | None = None) -> None:
         today = date.today()
@@ -395,6 +404,20 @@ class MainWindow:
         self.status_refreshing = False
         if profile_url == self.context.config.profile_url.rstrip("/"):
             self.profile_snapshot = snapshot
+            if (
+                snapshot
+                and snapshot.latest_published_at
+                and snapshot.has_publication_on(date.today()) is True
+            ):
+                try:
+                    self.context.repository.sync_online_publication(
+                        snapshot.latest_published_at,
+                        snapshot.latest_title,
+                        snapshot.latest_url,
+                    )
+                    self._refresh_history()
+                except Exception as exc:
+                    profile_error = f"历史同步失败：{exc}"
         self._render_publication_status(profile_error)
 
         status = schedule_status.strip()

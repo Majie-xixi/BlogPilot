@@ -128,6 +128,52 @@ class Repository:
             ).fetchone()
         return int(row["total"] or 0)
 
+    def sync_online_publication(
+        self,
+        published_at: datetime,
+        title: str | None,
+        url: str | None,
+    ) -> tuple[Run, bool]:
+        """Add one idempotent history row for a publication verified online."""
+        day = published_at.date()
+        start = datetime.combine(day, time.min).isoformat()
+        end = datetime.combine(day, time.max).isoformat()
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                """SELECT id FROM runs
+                WHERE status=? AND finished_at BETWEEN ? AND ?
+                ORDER BY finished_at DESC LIMIT 1""",
+                (RunStatus.PUBLISHED.value, start, end),
+            ).fetchone()
+        if existing is not None:
+            return self.get_run(str(existing["id"])), False
+
+        label = title.strip() if title and title.strip() else "51CTO 线上文章"
+        summary = f"{label} · {url}" if url else label
+        run = Run.new(Trigger.SYNCED)
+        run.id = f"online-sync-{day.isoformat()}"
+        run.status = RunStatus.PUBLISHED
+        run.started_at = published_at
+        run.finished_at = published_at
+        run.error_code = "online_sync"
+        run.error_summary = summary
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO runs(
+                id, trigger, status, started_at, finished_at, error_code, error_summary
+                ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run.id,
+                    run.trigger.value,
+                    run.status.value,
+                    run.started_at.isoformat(),
+                    run.finished_at.isoformat(),
+                    run.error_code,
+                    run.error_summary,
+                ),
+            )
+        return self.get_run(run.id), cursor.rowcount > 0
+
     def add_article(
         self,
         title: str,

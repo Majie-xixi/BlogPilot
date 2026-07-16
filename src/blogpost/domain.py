@@ -9,6 +9,7 @@ import uuid
 class Trigger(StrEnum):
     MANUAL = "manual"
     SCHEDULED = "scheduled"
+    SYNCED = "synced"
 
 
 class RunStatus(StrEnum):
