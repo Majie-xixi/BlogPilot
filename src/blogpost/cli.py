@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run-daily", help="run the scheduled daily pipeline")
     run_now = sub.add_parser("run-now", help="run the pipeline immediately")
     run_now.add_argument("--allow-same-day", action="store_true")
+    run_now.add_argument("--account", action="append", dest="accounts")
     sub.add_parser("login", help="open the 51CTO login browser")
     schedule = sub.add_parser("schedule", help="manage Windows scheduling")
     schedule_sub = schedule.add_subparsers(dest="schedule_command")
@@ -46,8 +47,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "schedule":
         if args.schedule_command == "install":
-            context.scheduler.install(context.config.schedule_time)
-            print(f"已安装：每天 {context.config.schedule_time:%H:%M}")
+            accounts = context.accounts(enabled_only=True)
+            context.scheduler.install([account.schedule_time for account in accounts])
+            print("已安装：" + "、".join(f"{a.display_name} {a.schedule_time:%H:%M}" for a in accounts))
             return 0
         if args.schedule_command == "remove":
             context.scheduler.remove()
@@ -58,16 +60,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         parser.error("schedule requires install, status or remove")
     try:
-        pipeline = context.build_pipeline()
         trigger = Trigger.SCHEDULED if args.command == "run-daily" else Trigger.MANUAL
-        result = pipeline.run(
+        results = context.run_accounts(
+            getattr(args, "accounts", None),
             trigger,
             allow_same_day=bool(getattr(args, "allow_same_day", False)),
-            progress=lambda status, message: print(f"[{status.value}] {message}"),
+            due_only=trigger == Trigger.SCHEDULED,
+            progress=lambda account, status, message: print(
+                f"[{account.display_name}][{status.value}] {message}"
+            ),
         )
-        if result.url:
-            print(result.url)
-        return 0 if result.status in {RunStatus.PUBLISHED, RunStatus.SKIPPED} else 1
+        for _account, result in results:
+            if result.url:
+                print(result.url)
+        return 0 if results and all(
+            result.status in {RunStatus.PUBLISHED, RunStatus.SKIPPED}
+            for _account, result in results
+        ) else 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 2

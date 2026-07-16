@@ -105,6 +105,8 @@ class Cto51Publisher:
     chrome: ChromeController
     diagnostic_dir: Path
     expected_profile_url: str = ""
+    secondary_category: str = "编程 Agent"
+    personal_category: str = "AI"
 
     def open_login(self) -> None:
         self.chrome.start("https://blog.51cto.com/login")
@@ -164,9 +166,18 @@ class Cto51Publisher:
                 if not session.evaluate(OPEN_SETTINGS_SCRIPT):
                     return self._diagnostic_failure(session, "找不到“发布文章”设置按钮")
                 self._wait_publish_dialog(session)
-                settings = session.evaluate(build_settings_script(category)) or {}
+                settings = session.evaluate(
+                    build_settings_script(
+                        category,
+                        self.secondary_category,
+                        self.personal_category,
+                    )
+                ) or {}
                 if not settings.get("personalOk"):
-                    settings["personalOk"] = self._select_personal_category(session, "AI")
+                    settings["personalOk"] = self._select_personal_category(
+                        session,
+                        self.personal_category,
+                    )
                 required = (
                     settings.get("categoryOk"),
                     settings.get("secondaryOk"),

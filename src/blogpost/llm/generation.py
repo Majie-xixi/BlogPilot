@@ -29,8 +29,15 @@ def _strip_fence(value: str) -> str:
 
 
 class TopicPlanner:
-    def __init__(self, client: CompletionClient):
+    def __init__(
+        self,
+        client: CompletionClient,
+        content_directions: str = "",
+        keywords: str = "",
+    ):
         self.client = client
+        self.content_directions = content_directions.strip()
+        self.keywords = keywords.strip()
 
     def choose(
         self,
@@ -39,8 +46,11 @@ class TopicPlanner:
         content_threshold: float,
     ) -> Topic:
         history = "\n".join(f"- {item.title}" for item in corpus[-80:])
+        directions = self.content_directions or "AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程"
+        keyword_hint = f"优先结合这些关键词：{self.keywords}。" if self.keywords else ""
         prompt = f"""为 51CTO AI 技术博客提出 8 个全新选题。
-范围：AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程。
+范围：{directions}。
+{keyword_hint}
 禁止：纯新闻、产品软文、虚构亲历、未经验证的性能数字。
 历史标题如下，必须避开：
 {history}

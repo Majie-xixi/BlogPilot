@@ -49,5 +49,9 @@ def log_path() -> Path:
     return app_data_dir() / "logs" / "application.log"
 
 
-def browser_profile_dir() -> Path:
-    return app_data_dir() / "chrome-profile"
+def browser_profile_dir(account_id: str = "default") -> Path:
+    safe_id = "".join(char for char in account_id if char.isalnum() or char in "-_") or "default"
+    if safe_id == "default":
+        # Preserve the existing signed-in session during the multi-account migration.
+        return app_data_dir() / "chrome-profile"
+    return app_data_dir() / "chrome-profiles" / safe_id

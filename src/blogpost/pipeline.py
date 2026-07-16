@@ -8,7 +8,14 @@ import logging
 from blogpost.article_store import ArticleStore
 from blogpost.config import AppConfig
 from blogpost.corpus import CorpusIndexer
-from blogpost.domain import Article, PublishResult, QualityReport, RunStatus, Trigger
+from blogpost.domain import (
+    Article,
+    DEFAULT_ACCOUNT_ID,
+    PublishResult,
+    QualityReport,
+    RunStatus,
+    Trigger,
+)
 from blogpost.markdown import normalize_single_h1, parse_markdown
 from blogpost.repositories import Repository
 from blogpost.run_lock import AlreadyRunning, RunLock
@@ -33,6 +40,7 @@ class PublishingPipeline:
         article_store: ArticleStore,
         publisher: object,
         run_lock: RunLock,
+        account_id: str = DEFAULT_ACCOUNT_ID,
     ):
         self.config = config
         self.repository = repository
@@ -45,6 +53,7 @@ class PublishingPipeline:
         self.article_store = article_store
         self.publisher = publisher
         self.run_lock = run_lock
+        self.account_id = account_id
 
     def run(
         self,
@@ -57,14 +66,27 @@ class PublishingPipeline:
         callback = progress or (lambda status, message: None)
 
         def emit(status: RunStatus, message: str) -> None:
-            logger.info("pipeline status=%s message=%s", status.value, message)
+            logger.info(
+                "pipeline status=%s account_id=%s message=%s",
+                status.value,
+                self.account_id,
+                message,
+            )
             callback(status, message)
 
         try:
             with self.run_lock:
-                run = self.repository.create_run(trigger)
-                logger.info("pipeline started run_id=%s trigger=%s", run.id, trigger.value)
-                local_published = self.repository.has_successful_publication(date.today())
+                run = self.repository.create_run(trigger, self.account_id)
+                logger.info(
+                    "pipeline started run_id=%s trigger=%s account_id=%s",
+                    run.id,
+                    trigger.value,
+                    self.account_id,
+                )
+                local_published = self.repository.has_successful_publication(
+                    date.today(),
+                    self.account_id,
+                )
                 online_check = getattr(self.publisher, "has_publication_on", None)
                 online_published = online_check(date.today()) if callable(online_check) and not local_published else False
                 profile_url = str(getattr(self.publisher, "expected_profile_url", "")).strip()
@@ -142,6 +164,7 @@ class PublishingPipeline:
                                 },
                                 ensure_ascii=False,
                             ),
+                            account_id=self.account_id,
                         )
                         self.repository.update_run(
                             run.id,
@@ -172,6 +195,7 @@ class PublishingPipeline:
                             {"deterministic": deterministic.score, "review": model_report.score},
                             ensure_ascii=False,
                         ),
+                        account_id=self.account_id,
                     )
 
                     self.repository.update_run(run.id, RunStatus.PUBLISHING, article_id=article_id)

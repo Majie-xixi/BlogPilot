@@ -46,7 +46,7 @@ class CorpusIndexer:
         if not self.generated_dir.exists():
             return []
         items = []
-        for path in sorted(self.generated_dir.glob("*.md")):
+        for path in sorted(self.generated_dir.rglob("*.md")):
             content = path.read_text(encoding="utf-8")
             document = parse_markdown(content)
             if document.title:

@@ -250,6 +250,16 @@ class Repository:
                 ).fetchone()
         return str(row["path"]) if row is not None else None
 
+    def article_by_path(self, path: str, account_id: str = DEFAULT_ACCOUNT_ID) -> dict | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT id,title,path,sha256,char_count,topic,created_at
+                FROM articles WHERE path=? AND account_id=?
+                ORDER BY id DESC LIMIT 1""",
+                (path, account_id),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def list_accounts(self, *, enabled_only: bool = False) -> list[Account]:
         query = "SELECT * FROM accounts"
         params: tuple[object, ...] = ()
@@ -276,6 +286,12 @@ class Repository:
             exists = connection.execute(
                 "SELECT 1 FROM accounts WHERE id=?", (account.id,)
             ).fetchone()
+            duplicate_name = connection.execute(
+                "SELECT 1 FROM accounts WHERE display_name=? AND id<>?",
+                (account.display_name, account.id),
+            ).fetchone()
+            if duplicate_name is not None:
+                raise ValueError("账号显示名称不能重复")
             if exists is None:
                 total = int(connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
                 if total >= 5:
@@ -311,6 +327,13 @@ class Repository:
         category: str,
         schedule_time: time,
     ) -> Account:
+        marker_key = "multi_account_legacy_migrated"
+        with self.database.connect() as connection:
+            migrated = connection.execute(
+                "SELECT 1 FROM settings WHERE key=?", (marker_key,)
+            ).fetchone()
+        if migrated is not None:
+            return self.get_account(DEFAULT_ACCOUNT_ID)
         current = self.get_account(DEFAULT_ACCOUNT_ID)
         account = Account(
             id=current.id,
@@ -331,7 +354,14 @@ class Repository:
             keywords=current.keywords,
             article_subdir=current.article_subdir,
         )
-        return self.save_account(account)
+        saved = self.save_account(account)
+        with self.database.connect() as connection:
+            connection.execute(
+                """INSERT OR REPLACE INTO settings(key,value,updated_at)
+                VALUES(?,?,?)""",
+                (marker_key, "1", datetime.now().isoformat()),
+            )
+        return saved
 
     @staticmethod
     def _account_from_row(row) -> Account:
