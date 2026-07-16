@@ -222,12 +222,15 @@ def configure_theme(root: tk.Tk) -> None:
     )
     style.configure(
         "App.Horizontal.TProgressbar",
-        troughcolor="#E2E8F0",
+        troughcolor="#E8EDF3",
         background=COLORS["primary"],
         borderwidth=0,
+        bordercolor="#E8EDF3",
+        relief="flat",
+        troughrelief="flat",
         lightcolor=COLORS["primary"],
         darkcolor=COLORS["primary"],
-        thickness=5,
+        thickness=4,
     )
     style.configure("TNotebook", background=COLORS["page"], borderwidth=0, tabmargins=(0, 0, 0, 0))
     style.configure(
