@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from html import unescape
+import json
 import os
 import re
 import subprocess
@@ -22,11 +23,48 @@ class ProfileSnapshot:
     month_count: int | None
     latest_title: str | None
     latest_url: str | None
+    display_name: str | None = None
 
     def has_publication_on(self, day: date) -> bool | None:
         if self.latest_published_at is None:
             return None
         return self.latest_published_at.date() == day
+
+
+def parse_profile_display_name(html: str) -> str | None:
+    """Extract the public blog owner name without starting a browser."""
+    json_patterns = (
+        r'"nickname"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"',
+        r'"nickName"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"',
+        r'"userName"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"',
+    )
+    for pattern in json_patterns:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            value = _decode_json_text(match.group("value"))
+            name = _normalize_profile_name(value)
+            if name:
+                return name
+
+    for tag in re.findall(r"<meta\b[^>]*>", html, re.IGNORECASE):
+        attributes = {
+            key.lower(): unescape(value)
+            for key, _quote, value in re.findall(
+                r"""([:\w-]+)\s*=\s*(["'])(.*?)\2""",
+                tag,
+                re.IGNORECASE | re.DOTALL,
+            )
+        }
+        kind = (attributes.get("name") or attributes.get("property") or "").lower()
+        if kind in {"author", "og:title", "twitter:title"}:
+            name = _normalize_profile_name(attributes.get("content", ""))
+            if name:
+                return name
+
+    title = re.search(r"<title[^>]*>(?P<value>.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if title:
+        return _normalize_profile_name(title.group("value"))
+    return None
 
 
 def parse_profile_html(
@@ -84,6 +122,7 @@ def parse_profile_html(
         month_count=int(month_match.group(1)) if month_match else None,
         latest_title=latest_title,
         latest_url=latest_url,
+        display_name=parse_profile_display_name(html),
     )
 
 
@@ -182,3 +221,23 @@ def parse_51cto_time(value: str, now: datetime) -> datetime | None:
 
 def _plain_text(value: str) -> str:
     return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", "", value))).strip()
+
+
+def _decode_json_text(value: str) -> str:
+    try:
+        return str(json.loads(f'"{value}"'))
+    except (json.JSONDecodeError, TypeError):
+        return value.replace(r"\/", "/").replace(r"\"", '"').replace(r"\\", "\\")
+
+
+def _normalize_profile_name(value: str) -> str | None:
+    name = _plain_text(value)
+    name = re.split(
+        r"\s*的博客(?:_|-|\s|$)|[_-]\s*(?:原创文章[_-]?)?51CTO博客|[_-]\s*51CTO",
+        name,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" _-|")
+    if not name or name.lower() in {"51cto", "51cto博客"} or len(name) > 80:
+        return None
+    return name

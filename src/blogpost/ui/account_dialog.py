@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time
+import queue
+import re
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 import uuid
 
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
+from blogpost.publishers.cto51_profile import fetch_profile_snapshot
 from blogpost.ui.theme import COLORS
 from blogpost.ui.widgets import ModernCheckButton
+
+
+def is_generic_account_name(value: str) -> bool:
+    return bool(re.fullmatch(r"账号\s*(?:\d+|[一二三四五])", value.strip()))
 
 
 class AccountManagerDialog(tk.Toplevel):
@@ -17,6 +26,12 @@ class AccountManagerDialog(tk.Toplevel):
         self.context = context
         self.on_saved = on_saved
         self.current_id = DEFAULT_ACCOUNT_ID
+        self.name_lookup_results: queue.Queue[tuple[str, str, bool, str | None, str | None]] = (
+            queue.Queue()
+        )
+        self.name_lookup_url: str | None = None
+        self.name_lookup_var = tk.StringVar(value="同步名称")
+        self.name_poll_id: str | None = None
         self.title("账号管理")
         self.configure(background=COLORS["surface"])
         self.transient(master)
@@ -38,6 +53,8 @@ class AccountManagerDialog(tk.Toplevel):
         }
         self._build()
         self._reload(DEFAULT_ACCOUNT_ID)
+        self.name_poll_id = self.after(150, self._drain_name_lookup)
+        self.protocol("WM_DELETE_WINDOW", self._close)
         self.grab_set()
         self.focus_force()
 
@@ -95,7 +112,23 @@ class AccountManagerDialog(tk.Toplevel):
             ttk.Label(form, text=label, style="Field.TLabel").grid(
                 row=row, column=column, sticky="w", padx=(0 if column == 0 else 10, 10 if column == 0 else 0)
             )
-            control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
+            if name == "profile_url":
+                control = ttk.Frame(form, style="Card.TFrame")
+                self.profile_entry = ttk.Entry(
+                    control,
+                    textvariable=self.vars[name],
+                    style="Modern.TEntry",
+                )
+                self.profile_entry.pack(side="left", fill="x", expand=True)
+                self.profile_entry.bind("<FocusOut>", self._auto_lookup_name)
+                ttk.Button(
+                    control,
+                    textvariable=self.name_lookup_var,
+                    style="Secondary.TButton",
+                    command=lambda: self._start_name_lookup(force=True),
+                ).pack(side="left", padx=(8, 0))
+            else:
+                control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
             control.grid(
                 row=row + 1,
                 column=column,
@@ -122,7 +155,7 @@ class AccountManagerDialog(tk.Toplevel):
         footer = ttk.Frame(shell, style="Surface.TFrame")
         footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Button(footer, text="关闭", style="Secondary.TButton", command=self.destroy).grid(
+        ttk.Button(footer, text="关闭", style="Secondary.TButton", command=self._close).grid(
             row=0, column=1
         )
         ttk.Button(footer, text="保存账号", style="Primary.TButton", command=self._save).grid(
@@ -169,6 +202,9 @@ class AccountManagerDialog(tk.Toplevel):
         }
         for name, value in values.items():
             self.vars[name].set(value)
+        self.name_lookup_var.set("同步名称")
+        if account.profile_url and is_generic_account_name(account.display_name):
+            self.after_idle(self._start_name_lookup)
 
     def _new(self) -> None:
         if len(self.context.accounts()) >= 5:
@@ -188,7 +224,89 @@ class AccountManagerDialog(tk.Toplevel):
         self.vars["keywords"].set("")
         self.vars["article_subdir"].set(self.current_id)
         self.vars["enabled"].set(True)
+        self.name_lookup_var.set("同步名称")
         self.tree.selection_remove(self.tree.selection())
+
+    def _auto_lookup_name(self, _event=None) -> None:
+        if not self.vars["profile_url"].get().strip():
+            return
+        if not self.vars["display_name"].get().strip() or is_generic_account_name(
+            self.vars["display_name"].get()
+        ):
+            self._start_name_lookup()
+
+    def _start_name_lookup(self, *, force: bool = False) -> None:
+        url = self.vars["profile_url"].get().strip().rstrip("/")
+        if not re.fullmatch(r"https://blog\.51cto\.com/u_\d+", url):
+            if force:
+                self.name_lookup_var.set("主页格式错误")
+            return
+        if self.name_lookup_url == url:
+            return
+        current_name = self.vars["display_name"].get().strip()
+        if not force and current_name and not is_generic_account_name(current_name):
+            return
+        account_id = self.current_id
+        self.name_lookup_url = url
+        self.name_lookup_var.set("读取中…")
+        threading.Thread(
+            target=self._name_lookup_worker,
+            args=(account_id, url, force),
+            daemon=True,
+        ).start()
+
+    def _name_lookup_worker(self, account_id: str, url: str, force: bool) -> None:
+        try:
+            display_name = fetch_profile_snapshot(url).display_name
+            error = None if display_name else "主页未提供可识别的博主名称"
+        except Exception as exc:
+            display_name = None
+            error = str(exc)
+        self.name_lookup_results.put((account_id, url, force, display_name, error))
+
+    def _drain_name_lookup(self) -> None:
+        try:
+            while True:
+                account_id, url, force, display_name, error = self.name_lookup_results.get_nowait()
+                if self.name_lookup_url == url:
+                    self.name_lookup_url = None
+                if account_id != self.current_id:
+                    continue
+                if self.vars["profile_url"].get().strip().rstrip("/") != url:
+                    continue
+                if error or not display_name:
+                    self.name_lookup_var.set("读取失败")
+                    continue
+                current_name = self.vars["display_name"].get().strip()
+                if force or not current_name or is_generic_account_name(current_name):
+                    self.vars["display_name"].set(display_name)
+                    self.name_lookup_var.set("已同步")
+                    self._save_synced_name(account_id, url, display_name)
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.name_poll_id = self.after(150, self._drain_name_lookup)
+
+    def _save_synced_name(self, account_id: str, url: str, display_name: str) -> None:
+        existing = {account.id: account for account in self.context.accounts()}
+        account = existing.get(account_id)
+        if account is None or account.profile_url.rstrip("/") != url:
+            return
+        if account.display_name == display_name:
+            return
+        self.context.repository.save_account(replace(account, display_name=display_name))
+        if self.tree.exists(account_id):
+            self.tree.item(account_id, text=display_name)
+        self.on_saved(account_id)
+
+    def _close(self) -> None:
+        if self.name_poll_id is not None:
+            try:
+                self.after_cancel(self.name_poll_id)
+            except tk.TclError:
+                pass
+            self.name_poll_id = None
+        self.destroy()
 
     def _save(self) -> None:
         try:

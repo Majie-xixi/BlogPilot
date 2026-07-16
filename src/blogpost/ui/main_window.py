@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 import os
 from pathlib import Path
@@ -12,9 +13,12 @@ import webbrowser
 
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
-from blogpost.paths import log_path
 from blogpost.publishers.cto51_profile import ProfileSnapshot
-from blogpost.ui.account_dialog import AccountManagerDialog, BatchPublishDialog
+from blogpost.ui.account_dialog import (
+    AccountManagerDialog,
+    BatchPublishDialog,
+    is_generic_account_name,
+)
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
 
@@ -90,7 +94,7 @@ class MainWindow:
         self._build()
         self._reload_accounts(DEFAULT_ACCOUNT_ID)
         self.refresh()
-        self._load_recent_log()
+        self._show_empty_log()
         self.root.after(150, self._drain_queue)
 
     def _build(self) -> None:
@@ -241,7 +245,14 @@ class MainWindow:
         self.detail_toggle_button = ttk.Button(
             section, text="查看历史记录", style="Link.TButton", command=self._toggle_detail_view
         )
-        self.detail_toggle_button.grid(row=0, column=2, sticky="e")
+        self.detail_toggle_button.grid(row=0, column=2, sticky="e", padx=(0, 8))
+        self.clear_log_button = ttk.Button(
+            section,
+            text="清空日志",
+            style="Link.TButton",
+            command=self._clear_log_and_show_empty,
+        )
+        self.clear_log_button.grid(row=0, column=3, sticky="e")
 
         detail_stack = ttk.Frame(page, style="Page.TFrame")
         detail_stack.grid(row=5, column=0, sticky="nsew")
@@ -357,7 +368,7 @@ class MainWindow:
         self.status_refreshing = False
         self.profile_snapshot = None
         self._clear_log()
-        self._load_recent_log()
+        self._show_empty_log()
         self.refresh()
 
     def _toggle_account_popup(self) -> None:
@@ -567,6 +578,19 @@ class MainWindow:
             self.profile_snapshot = snapshot
             if (
                 snapshot
+                and snapshot.display_name
+                and is_generic_account_name(self.current_account.display_name)
+            ):
+                try:
+                    saved = self.context.repository.save_account(
+                        replace(self.current_account, display_name=snapshot.display_name)
+                    )
+                    self.account_map[account_id] = saved
+                    self.account_var.set(saved.display_name)
+                except Exception:
+                    pass
+            if (
+                snapshot
                 and snapshot.latest_published_at
                 and snapshot.has_publication_on(date.today()) is True
             ):
@@ -599,24 +623,6 @@ class MainWindow:
             }.get(status, status)
             self.schedule_value_var.set(f"每天 {time_text}")
             self.schedule_detail_var.set(f"Windows 计划任务已安装 · {state_text}")
-
-    def _load_recent_log(self) -> None:
-        path = log_path()
-        if not path.exists() or not path.stat().st_size:
-            self._append_log("等待任务开始。生成、检查、保存和发布步骤会显示在这里。", "muted", timestamp=False)
-            return
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-60:]
-            for line in lines:
-                account_match = re.search(r"account_id=([^\s]+)", line)
-                if account_match and account_match.group(1) != self.current_account_id:
-                    continue
-                if not account_match and self.current_account_id != DEFAULT_ACCOUNT_ID:
-                    continue
-                time_text, level, message = parse_persisted_log_line(line)
-                self._append_log(message, level, time_text=time_text)
-        except OSError:
-            self._append_log("无法读取历史日志，但不影响运行。", "warning", timestamp=False)
 
     def _append_log(
         self,
@@ -661,12 +667,24 @@ class MainWindow:
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
 
+    def _show_empty_log(self) -> None:
+        self._append_log(
+            "等待任务开始。本次生成、检查、保存和发布步骤会显示在这里。",
+            "muted",
+            timestamp=False,
+        )
+
+    def _clear_log_and_show_empty(self) -> None:
+        self._clear_log()
+        self._show_empty_log()
+
     def _show_log_view(self) -> None:
         self.detail_view = "log"
         self.log_view.tkraise()
         self.detail_title_var.set("运行日志")
         self.detail_hint_var.set("生成、检查、保存和发布步骤会实时显示")
         self.detail_toggle_button.configure(text="查看历史记录")
+        self.clear_log_button.grid()
 
     def _toggle_detail_view(self) -> None:
         if self.detail_view == "log":
@@ -675,6 +693,7 @@ class MainWindow:
             self.detail_title_var.set("历史记录")
             self.detail_hint_var.set("最多显示最近 30 次运行结果")
             self.detail_toggle_button.configure(text="返回运行日志")
+            self.clear_log_button.grid_remove()
         else:
             self._show_log_view()
 
