@@ -4,7 +4,11 @@ a = Analysis(
     ['src/blogpost/entrypoint.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('src/blogpost/migrations/001_initial.sql', 'blogpost/migrations')],
+    datas=[
+        ('src/blogpost/migrations/001_initial.sql', 'blogpost/migrations'),
+        ('src/blogpost/migrations/002_multi_account.sql', 'blogpost/migrations'),
+        ('src/blogpost/migrations/003_account_article_type.sql', 'blogpost/migrations'),
+    ],
     hiddenimports=['tkinter', 'sqlite3'],
     hookspath=[],
     runtime_hooks=[],

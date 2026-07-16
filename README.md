@@ -1,19 +1,22 @@
 # BlogPilot（智博日更）
 
-Windows 本地软件：每天自动生成一篇原创 AI 技术博文，质量检查后填充并发布到 51CTO。
+Windows 本地软件：为一个或多个 51CTO 账号分别生成原创 AI 技术博文，质量检查后按顺序自动发布。
 
 在 VS Code 中调试时，可直接右键项目根目录的 `main.py`，选择“在终端中运行 Python 文件”。
 
 ## 当前能力
 
-- 默认每天 10:00，可修改时间，也可点击“立即生成并发布”。
-- 默认使用 DeepSeek OpenAI 格式接口（`https://api.deepseek.com`、`deepseek-v4-pro`），也支持手动改为 OpenAI、通义千问等兼容接口。
-- 读取用户配置的历史文章目录作为风格和去重语料，绝不修改历史文章。
-- 新安装默认把文章保存到“文档\\BlogPilot\\generated_posts”，也可通过本机配置指定其他目录。
+- 最多管理 5 个本地账号；切换账号会立即刷新该账号的今日状态、月度进度、文章与运行历史。
+- 每个账号可独立设置主页、发布时间、月目标、文章分类、博文类型、内容方向和主题关键词；关键词会作为选题硬约束。
+- 支持当前账号单独执行，也支持勾选多个账号后串行生成、串行发布；一个账号失败不会阻止后续账号。
+- 不同账号当天的标题、主题和正文统一参与查重，避免生成相似文章。
+- 发布失败后可直接重发当前账号已经保存的文章，不会再次调用大模型生成。
+- 默认使用 DeepSeek OpenAI 格式接口（`https://api.deepseek.com`、`deepseek-v4-pro`），也支持其他兼容接口。
+- 当前数据工作区位于 `E:\Projects\BlogPilotWorkspace`；文章按账号保存在 `generated_posts\<account_id>`。
 - 检查字数、AI 主题、Markdown、密钥泄漏、标题和正文相似度。
-- 提供动画进度条和实时运行日志；质量未通过时仍会保存“待检查”草稿。
 - 使用 Windows DPAPI 加密 API Key。
-- 使用电脑已有 Chrome 和独立应用 Profile 登录 51CTO，不接触普通 Chrome Profile。
+- 使用电脑已有 Chrome，并为每个账号建立独立应用 Profile，不接触普通 Chrome Profile。
+- Chrome 自动化禁用组件更新、后台同步和本地生成式 AI 功能；按流量计费网络会暂停自动生成和发布。
 - 遇到验证码、登录失效、页面结构变化或发布结果不明确时停止。
 
 ## 运行
@@ -29,6 +32,7 @@ python -m blogpost gui
 
 ```powershell
 python -m blogpost run-now
+python -m blogpost run-now --account default --account account-xxxx
 python -m blogpost run-daily
 python -m blogpost login
 python -m blogpost schedule install
@@ -37,12 +41,14 @@ python -m blogpost schedule status
 
 ## 首次使用
 
-1. 打开“设置”，填写 API Base URL、模型名称和 API Key。
-2. 保持“安全试运行”开启。
-3. 点击“打开 51CTO 登录窗口”，在独立 Chrome 窗口中登录。
-4. 点击“立即生成并发布”，检查编辑器中的排版、原创标记和 AI 分类。
-5. 校准确认无误后，在设置中关闭安全试运行。
-6. 点击“安装/更新每日任务”，注册每天 10:00 的 Windows 任务。
+1. 打开“全局设置”，填写 API Base URL、模型名称和 API Key，并保持“安全试运行”开启。
+2. 打开“账号管理”，设置账号名称、51CTO 主页、发布时间、分类、博文类型和主题关键词；需要时新增第二个账号。
+3. 切换到每个账号，分别点击“自动发布登录”，在对应独立 Chrome 窗口中完成登录。
+4. 使用“立即生成并发布”校准当前账号，或使用“批量依次发布”勾选多个账号。
+5. 人工确认排版、原创标记和分类无误后，在全局设置中关闭安全试运行。
+6. 点击“安装 / 更新每日任务”，按所有启用账号的发布时间注册统一 Windows 任务。
+
+账号配置、Cookie、数据库、日志、API Key 和文章都只保存在本机，Git 不会上传这些数据。
 
 真实发布前请阅读 [首次运行说明](docs/first-run.md) 和 [安全说明](docs/security.md)。
 
