@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 import json
 from pathlib import Path
 import time
@@ -10,6 +10,7 @@ from blogpost.browser.cdp import CdpSession
 from blogpost.browser.chrome import ChromeController
 from blogpost.domain import Article, PublishResult, RunStatus
 from blogpost.publishers.diagnostics import save_diagnostic
+from blogpost.publishers.cto51_profile import ProfileSnapshot, fetch_profile_snapshot
 
 
 PUBLISH_URL = "https://blog.51cto.com/blogger/publish"
@@ -109,42 +110,16 @@ class Cto51Publisher:
         self.chrome.start("https://blog.51cto.com/login")
 
     def has_publication_on(self, day: date) -> bool | None:
-        """Check the logged-in user's newest public article date.
-
-        ``None`` means the online state could not be verified; callers can then
-        safely fall back to their local publication record.
-        """
+        """Check the public profile without starting the automation browser."""
         try:
-            profile_url = self.expected_profile_url.rstrip("/") or self._current_profile_url()
-            if not profile_url:
-                return None
-
-            if self.chrome.port is None:
-                self.chrome.start(profile_url)
-                profile_target = self.chrome.wait_for_target(profile_url)
-            else:
-                profile_target = self.chrome.open_tab(profile_url)
-            with CdpSession(profile_target["webSocketDebuggerUrl"]) as session:
-                self._wait_page_content(session, profile_url)
-                article_url = self._wait_for_value(
-                    session,
-                    "document.querySelector('#common-article-listbox-1 .common-article-list .title a[href]')?.href||''",
-                )
-            if not article_url:
-                return False
-
-            article_target = self.chrome.open_tab(article_url)
-            with CdpSession(article_target["webSocketDebuggerUrl"]) as session:
-                self._wait_page_content(session, article_url)
-                published_at = self._wait_for_value(
-                    session,
-                    "document.querySelector('time[pubdate]')?.getAttribute('pubdate')||document.querySelector('time[pubdate]')?.textContent.trim()||''",
-                )
-            if not published_at:
-                return None
-            return datetime.fromisoformat(published_at.strip()).date() == day
+            return self.profile_status().has_publication_on(day)
         except Exception:
             return None
+
+    def profile_status(self) -> ProfileSnapshot:
+        if not self.expected_profile_url:
+            raise ValueError("请先在设置中填写目标 51CTO 博客主页")
+        return fetch_profile_snapshot(self.expected_profile_url)
 
     def publish(self, article: Article, category: str, dry_run: bool) -> PublishResult:
         try:

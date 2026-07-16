@@ -37,6 +37,11 @@ class ChromeController:
             f"--remote-debugging-port={port}",
             "--remote-allow-origins=*",
             f"--user-data-dir={self.profile_dir}",
+            # This profile exists only for 51CTO automation.  Do not let it
+            # trigger Chrome component/model downloads or unrelated services.
+            "--disable-component-update",
+            "--disable-background-networking",
+            "--disable-sync",
             "--no-first-run",
             "--no-default-browser-check",
             url,

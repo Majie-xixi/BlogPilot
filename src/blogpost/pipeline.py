@@ -67,10 +67,21 @@ class PublishingPipeline:
                 local_published = self.repository.has_successful_publication(date.today())
                 online_check = getattr(self.publisher, "has_publication_on", None)
                 online_published = online_check(date.today()) if callable(online_check) and not local_published else False
+                profile_url = str(getattr(self.publisher, "expected_profile_url", "")).strip()
+                if online_published is None and profile_url and not allow_same_day:
+                    message = "无法核对 51CTO 今日发布状态，为防止重复发文，本次已停止且不会调用大模型"
+                    self.repository.update_run(
+                        run.id,
+                        RunStatus.UNKNOWN,
+                        error_code="online_status_unknown",
+                        error_summary=message,
+                    )
+                    emit(RunStatus.UNKNOWN, message)
+                    return PublishResult(RunStatus.UNKNOWN, message=message)
                 if (local_published or online_published is True) and not allow_same_day:
-                    self.repository.update_run(run.id, RunStatus.SKIPPED)
                     source = "51CTO 线上" if online_published is True else "软件记录"
                     message = f"{source}显示今天已经发布，已跳过且不会调用大模型"
+                    self.repository.update_run(run.id, RunStatus.SKIPPED, error_summary=message)
                     emit(RunStatus.SKIPPED, message)
                     return PublishResult(RunStatus.SKIPPED, message=message)
                 try:

@@ -14,6 +14,7 @@ from blogpost.application import ApplicationContext
 from blogpost.domain import Article, PublishResult, RunStatus, Trigger
 from blogpost.markdown import parse_markdown
 from blogpost.paths import app_data_dir, log_path
+from blogpost.publishers.cto51_profile import ProfileSnapshot
 from blogpost.run_lock import AlreadyRunning, RunLock
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
@@ -75,6 +76,9 @@ class MainWindow:
         self.context = context
         self.queue: Queue[tuple] = Queue()
         self.running = False
+        self.profile_snapshot: ProfileSnapshot | None = None
+        self.status_refreshing = False
+        self.status_refresh_generation = 0
         self._build()
         self.refresh()
         self._load_recent_log()
@@ -142,14 +146,17 @@ class MainWindow:
 
         actions = ttk.Frame(page, style="Page.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(14, 18))
-        for text, command in (
-            ("打开 51CTO 登录窗口", self.open_login),
-            ("安装 / 更新每日任务", self.install_schedule),
-            ("打开最近文章", self.open_latest_article),
-            ("打开文章目录", self.open_generated_dir),
+        for column in range(3):
+            actions.columnconfigure(column, weight=1, uniform="actions")
+        for row, column, text, command in (
+            (0, 0, "打开 51CTO", self.open_profile),
+            (0, 1, "自动发布登录", self.open_login),
+            (0, 2, "安装 / 更新每日任务", self.install_schedule),
+            (1, 0, "打开最近文章", self.open_latest_article),
+            (1, 1, "打开文章目录", self.open_generated_dir),
         ):
             button = ttk.Button(actions, text=text, style="Secondary.TButton", command=command)
-            button.pack(side="left", padx=(0 if not actions.winfo_children() else 10, 0))
+            button.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 5, 0 if column == 2 else 5), pady=(0 if row == 0 else 8, 0))
             if text == "打开最近文章":
                 self.latest_article_button = button
 
@@ -159,7 +166,7 @@ class MainWindow:
             style="Secondary.TButton",
             command=self.retry_latest_article,
         )
-        self.retry_button.pack(side="left", padx=(10, 0))
+        self.retry_button.grid(row=1, column=2, sticky="ew", padx=(5, 0), pady=(8, 0))
 
         section = ttk.Frame(page, style="Page.TFrame")
         section.grid(row=4, column=0, sticky="ew", pady=(0, 7))
@@ -270,12 +277,9 @@ class MainWindow:
 
     def refresh(self) -> None:
         cfg = self.context.config
-        self.schedule_value_var.set(f"每天 {cfg.schedule_time:%H:%M}")
-        today = date.today()
-        published = self.context.repository.has_successful_publication(today)
-        tracked_days = self.context.repository.count_successful_days(today.year, today.month)
-        self.today_value_var.set("已发布" if published else "尚未发布")
-        self.today_detail_var.set(f"软件记录：本月已发布 {tracked_days} 天")
+        self.schedule_value_var.set(f"配置时间 {cfg.schedule_time:%H:%M}")
+        self.schedule_detail_var.set("正在检查 Windows 计划任务…")
+        self._render_publication_status()
         if cfg.dry_run:
             self.mode_value_var.set("安全试运行")
             self.mode_detail_var.set("填写编辑器，不点击最终发布")
@@ -314,6 +318,102 @@ class MainWindow:
         self.retry_button.configure(
             state="normal" if latest and Path(latest).exists() and not self.running else "disabled"
         )
+        self._start_runtime_status_refresh()
+
+    def _render_publication_status(self, error: str | None = None) -> None:
+        today = date.today()
+        local_published = self.context.repository.has_successful_publication(today)
+        local_days = self.context.repository.count_successful_days(today.year, today.month)
+        snapshot = self.profile_snapshot
+        if snapshot and snapshot.profile_url == self.context.config.profile_url.rstrip("/"):
+            online_published = snapshot.has_publication_on(today)
+            if online_published is True:
+                self.today_value_var.set("已发布")
+            elif online_published is False and local_published:
+                self.today_value_var.set("状态待确认")
+            elif online_published is False:
+                self.today_value_var.set("尚未发布")
+            else:
+                self.today_value_var.set("已发布" if local_published else "状态未知")
+
+            if snapshot.month_count is not None:
+                detail = f"51CTO 主页：本月已发布 {snapshot.month_count} 篇"
+            else:
+                detail = f"51CTO 今日已核对 · 软件记录本月 {local_days} 天"
+            if online_published is False and local_published:
+                detail = "软件记录显示已发布，但 51CTO 主页暂未显示"
+            self.today_detail_var.set(detail)
+            return
+
+        self.today_value_var.set("已发布" if local_published else "尚未发布")
+        if self.status_refreshing:
+            self.today_detail_var.set("正在同步 51CTO 公开主页…")
+        elif error:
+            self.today_detail_var.set(f"在线核对失败 · 仅软件记录本月 {local_days} 天")
+        elif not self.context.config.profile_url:
+            self.today_detail_var.set("未设置 51CTO 主页 · 仅显示软件记录")
+        else:
+            self.today_detail_var.set(f"仅软件记录：本月已发布 {local_days} 天")
+
+    def _start_runtime_status_refresh(self, *, force: bool = False) -> None:
+        if self.status_refreshing and not force:
+            return
+        self.status_refresh_generation += 1
+        generation = self.status_refresh_generation
+        profile_url = self.context.config.profile_url.rstrip("/")
+        self.status_refreshing = True
+        self._render_publication_status()
+
+        def worker() -> None:
+            snapshot = None
+            profile_error = None
+            try:
+                if profile_url:
+                    snapshot = self.context.publisher.profile_status()
+            except Exception as exc:
+                profile_error = str(exc)
+            try:
+                schedule_status = self.context.scheduler.status()
+            except Exception as exc:
+                schedule_status = f"检查失败：{exc}"
+            self.queue.put(
+                ("runtime_status", generation, profile_url, snapshot, profile_error, schedule_status)
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_runtime_status(
+        self,
+        generation: int,
+        profile_url: str,
+        snapshot: ProfileSnapshot | None,
+        profile_error: str | None,
+        schedule_status: str,
+    ) -> None:
+        if generation != self.status_refresh_generation:
+            return
+        self.status_refreshing = False
+        if profile_url == self.context.config.profile_url.rstrip("/"):
+            self.profile_snapshot = snapshot
+        self._render_publication_status(profile_error)
+
+        status = schedule_status.strip()
+        time_text = self.context.config.schedule_time.strftime("%H:%M")
+        if not status or "未安装" in status:
+            self.schedule_value_var.set("尚未安装")
+            self.schedule_detail_var.set(f"配置时间 {time_text} · 点击下方按钮安装")
+        elif status.startswith("检查失败"):
+            self.schedule_value_var.set(f"配置时间 {time_text}")
+            self.schedule_detail_var.set(status)
+        else:
+            state_text = {
+                "Ready": "就绪",
+                "Running": "正在运行",
+                "Disabled": "已禁用",
+                "Queued": "等待运行",
+            }.get(status, status)
+            self.schedule_value_var.set(f"每天 {time_text}")
+            self.schedule_detail_var.set(f"Windows 计划任务已安装 · {state_text}")
 
     def _load_recent_log(self) -> None:
         path = log_path()
@@ -395,7 +495,13 @@ class MainWindow:
         if self.running:
             return
         allow = False
-        if self.context.repository.has_successful_publication(date.today()):
+        online_published = (
+            self.profile_snapshot.has_publication_on(date.today())
+            if self.profile_snapshot
+            and self.profile_snapshot.profile_url == self.context.config.profile_url.rstrip("/")
+            else None
+        )
+        if self.context.repository.has_successful_publication(date.today()) or online_published is True:
             allow = messagebox.askyesno("今天已经发布", "今天已有成功发布记录，仍要再生成并发布一篇吗？")
             if not allow:
                 return
@@ -495,6 +601,8 @@ class MainWindow:
                     self._append_log(f"{STATUS_TEXT.get(status, status.value)}：{message}", tag)
                 elif event[0] == "done":
                     self._finish_run(event[1])
+                elif event[0] == "runtime_status":
+                    self._apply_runtime_status(*event[1:])
         except Empty:
             pass
         self.root.after(150, self._drain_queue)
@@ -569,17 +677,23 @@ class MainWindow:
         dialog.grab_set()
         dialog.focus_force()
 
+    def open_profile(self) -> None:
+        url = self.context.config.profile_url or "https://blog.51cto.com/"
+        webbrowser.open(url)
+        self.progress_var.set("已使用默认浏览器打开 51CTO")
+
     def open_login(self) -> None:
         try:
             self.context.publisher.open_login()
-            self.progress_var.set("已打开独立 Chrome 登录窗口 · 请完成 51CTO 登录")
-            self._append_log("已打开 51CTO 登录窗口。")
+            self.progress_var.set("已打开自动发布专用窗口 · 只需在此登录一次")
+            self._append_log("已打开自动发布专用的 51CTO 登录窗口。")
         except Exception as exc:
-            messagebox.showerror("无法打开登录窗口", str(exc))
+            messagebox.showerror("无法打开自动发布登录窗口", str(exc))
 
     def install_schedule(self) -> None:
         try:
             self.context.scheduler.install(self.context.config.schedule_time)
+            self._start_runtime_status_refresh(force=True)
             messagebox.showinfo("定时任务", f"已设置每天 {self.context.config.schedule_time:%H:%M} 自动执行")
         except Exception as exc:
             messagebox.showerror("定时任务安装失败", str(exc))
