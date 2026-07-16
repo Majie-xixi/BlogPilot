@@ -57,6 +57,10 @@ class Database:
                 connection.execute(
                     f"ALTER TABLE {table} ADD COLUMN account_id TEXT NOT NULL DEFAULT 'default'"
                 )
+        if not self._has_column(connection, "accounts", "article_type"):
+            connection.execute(
+                "ALTER TABLE accounts ADD COLUMN article_type TEXT NOT NULL DEFAULT '技术解析'"
+            )
         connection.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_runs_account_started
@@ -69,5 +73,9 @@ class Database:
         )
         connection.execute(
             "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(2, ?)",
+            (datetime.now().isoformat(),),
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(3, ?)",
             (datetime.now().isoformat(),),
         )

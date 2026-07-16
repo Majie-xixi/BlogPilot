@@ -32,10 +32,12 @@ class TopicPlanner:
     def __init__(
         self,
         client: CompletionClient,
+        article_type: str = "",
         content_directions: str = "",
         keywords: str = "",
     ):
         self.client = client
+        self.article_type = article_type.strip()
         self.content_directions = content_directions.strip()
         self.keywords = keywords.strip()
 
@@ -47,8 +49,14 @@ class TopicPlanner:
     ) -> Topic:
         history = "\n".join(f"- {item.title}" for item in corpus[-80:])
         directions = self.content_directions or "AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程"
-        keyword_hint = f"优先结合这些关键词：{self.keywords}。" if self.keywords else ""
+        type_hint = self.article_type or "技术解析"
+        keyword_hint = (
+            f"文章主题必须围绕这些关键词展开：{self.keywords}；标题或摘要必须明确体现这些关键词。"
+            if self.keywords
+            else ""
+        )
         prompt = f"""为 51CTO AI 技术博客提出 8 个全新选题。
+博文类型：{type_hint}。
 范围：{directions}。
 {keyword_hint}
 禁止：纯新闻、产品软文、虚构亲历、未经验证的性能数字。
@@ -68,6 +76,14 @@ class TopicPlanner:
                 str(candidate.get("direction", "AI")).strip(),
             )
             if not topic.title or not topic.summary:
+                continue
+            keywords = [
+                value.strip().casefold()
+                for value in re.split(r"[,，、;；\s]+", self.keywords)
+                if value.strip()
+            ]
+            candidate_text = f"{topic.title} {topic.summary}".casefold()
+            if keywords and not all(keyword in candidate_text for keyword in keywords):
                 continue
             if any(title_similarity(topic.title, item.title) >= title_threshold for item in corpus):
                 continue

@@ -71,6 +71,7 @@ class Account:
     category: str = "AI 智能体"
     secondary_category: str = "编程 Agent"
     personal_category: str = "AI"
+    article_type: str = "技术解析"
     content_directions: str = "AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程"
     keywords: str = ""
     article_subdir: str = "default"
@@ -84,6 +85,8 @@ class Account:
             raise ValueError("51CTO 主页地址格式不正确")
         if not 1 <= self.monthly_target <= 100:
             raise ValueError("每月目标篇数必须在 1 到 100 之间")
+        if not self.article_type.strip():
+            raise ValueError("博文类型不能为空")
         if not self.article_subdir.strip() or any(char in self.article_subdir for char in '<>:"/\\|?*'):
             raise ValueError("文章子目录名称无效")
 

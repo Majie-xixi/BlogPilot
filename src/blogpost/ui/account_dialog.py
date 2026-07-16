@@ -29,6 +29,7 @@ class AccountManagerDialog(tk.Toplevel):
             "category": tk.StringVar(value="AI 智能体"),
             "secondary_category": tk.StringVar(value="编程 Agent"),
             "personal_category": tk.StringVar(value="AI"),
+            "article_type": tk.StringVar(value="技术解析"),
             "content_directions": tk.StringVar(),
             "keywords": tk.StringVar(),
             "article_subdir": tk.StringVar(value="default"),
@@ -86,38 +87,53 @@ class AccountManagerDialog(tk.Toplevel):
             ("二级分类", "secondary_category", 4, 1),
             ("个人分类", "personal_category", 6, 0),
             ("文章保存子目录", "article_subdir", 6, 1),
-            ("内容方向", "content_directions", 8, 0),
-            ("主题关键词（可留空）", "keywords", 8, 1),
+            ("博文类型", "article_type", 8, 0),
+            ("内容方向", "content_directions", 8, 1),
         )
         for label, name, row, column in fields:
             ttk.Label(form, text=label, style="Field.TLabel").grid(
                 row=row, column=column, sticky="w", padx=(0 if column == 0 else 10, 10 if column == 0 else 0)
             )
-            ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry").grid(
+            if name == "article_type":
+                control = ttk.Combobox(
+                    form,
+                    textvariable=self.vars[name],
+                    values=("技术解析", "入门教程", "工程实践", "架构设计", "问题排查", "工具评测"),
+                    style="Modern.TCombobox",
+                )
+            else:
+                control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
+            control.grid(
                 row=row + 1,
                 column=column,
                 sticky="ew",
                 padx=(0 if column == 0 else 10, 10 if column == 0 else 0),
-                pady=(6, 13),
+                pady=(6, 11),
             )
+        ttk.Label(form, text="主题关键词（作为文章主题硬约束）", style="Field.TLabel").grid(
+            row=10, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Entry(form, textvariable=self.vars["keywords"], style="Modern.TEntry").grid(
+            row=11, column=0, columnspan=2, sticky="ew", pady=(6, 13)
+        )
         ttk.Checkbutton(
             form,
             text="启用自动生成与发布",
             variable=self.vars["enabled"],
             style="Modern.TCheckbutton",
-        ).grid(row=10, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=12, column=0, sticky="w", pady=(2, 0))
         ttk.Label(
             form,
             text="每个账号使用独立 Chrome 登录环境；登录失效只暂停该账号。",
             style="CardDetail.TLabel",
-        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        actions = ttk.Frame(form, style="Surface.TFrame")
-        actions.grid(row=12, column=0, columnspan=2, sticky="sew", pady=(20, 0))
-        actions.columnconfigure(0, weight=1)
-        ttk.Button(actions, text="关闭", style="Secondary.TButton", command=self.destroy).grid(
+        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        footer = ttk.Frame(shell, style="Surface.TFrame")
+        footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        footer.columnconfigure(0, weight=1)
+        ttk.Button(footer, text="关闭", style="Secondary.TButton", command=self.destroy).grid(
             row=0, column=1
         )
-        ttk.Button(actions, text="保存账号", style="Primary.TButton", command=self._save).grid(
+        ttk.Button(footer, text="保存账号", style="Primary.TButton", command=self._save).grid(
             row=0, column=2, padx=(10, 0)
         )
 
@@ -153,6 +169,7 @@ class AccountManagerDialog(tk.Toplevel):
             "category": account.category,
             "secondary_category": account.secondary_category,
             "personal_category": account.personal_category,
+            "article_type": account.article_type,
             "content_directions": account.content_directions,
             "keywords": account.keywords,
             "article_subdir": account.article_subdir,
@@ -174,6 +191,7 @@ class AccountManagerDialog(tk.Toplevel):
         self.vars["category"].set("AI 智能体")
         self.vars["secondary_category"].set("编程 Agent")
         self.vars["personal_category"].set("AI")
+        self.vars["article_type"].set("技术解析")
         self.vars["content_directions"].set("AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程")
         self.vars["keywords"].set("")
         self.vars["article_subdir"].set(self.current_id)
@@ -196,6 +214,7 @@ class AccountManagerDialog(tk.Toplevel):
                 category=self.vars["category"].get().strip(),
                 secondary_category=self.vars["secondary_category"].get().strip(),
                 personal_category=self.vars["personal_category"].get().strip(),
+                article_type=self.vars["article_type"].get().strip(),
                 content_directions=self.vars["content_directions"].get().strip(),
                 keywords=self.vars["keywords"].get().strip(),
                 article_subdir=self.vars["article_subdir"].get().strip(),

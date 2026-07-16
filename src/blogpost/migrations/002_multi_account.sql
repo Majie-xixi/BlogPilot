@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     category TEXT NOT NULL DEFAULT 'AI 智能体',
     secondary_category TEXT NOT NULL DEFAULT '编程 Agent',
     personal_category TEXT NOT NULL DEFAULT 'AI',
+    article_type TEXT NOT NULL DEFAULT '技术解析',
     content_directions TEXT NOT NULL DEFAULT 'AI Agent、AI 编程、Prompt、AIOps、边缘 AI、大模型工程',
     keywords TEXT NOT NULL DEFAULT '',
     article_subdir TEXT NOT NULL DEFAULT 'default',

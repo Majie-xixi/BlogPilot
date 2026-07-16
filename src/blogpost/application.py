@@ -89,7 +89,12 @@ class ApplicationContext:
             config,
             self.repository,
             CorpusIndexer(config.history_dir, self.config.generated_dir),
-            TopicPlanner(client, account.content_directions, account.keywords),
+            TopicPlanner(
+                client,
+                account.article_type,
+                account.content_directions,
+                account.keywords,
+            ),
             ArticleGenerator(client),
             QualityGate(
                 config.min_chinese_chars,

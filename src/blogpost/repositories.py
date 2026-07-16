@@ -299,22 +299,24 @@ class Repository:
             connection.execute(
                 """INSERT INTO accounts(
                 id,display_name,profile_url,enabled,sort_order,schedule_time,monthly_target,
-                category,secondary_category,personal_category,content_directions,keywords,
+                category,secondary_category,personal_category,article_type,content_directions,keywords,
                 article_subdir,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 display_name=excluded.display_name,profile_url=excluded.profile_url,
                 enabled=excluded.enabled,sort_order=excluded.sort_order,
                 schedule_time=excluded.schedule_time,monthly_target=excluded.monthly_target,
                 category=excluded.category,secondary_category=excluded.secondary_category,
                 personal_category=excluded.personal_category,
+                article_type=excluded.article_type,
                 content_directions=excluded.content_directions,keywords=excluded.keywords,
                 article_subdir=excluded.article_subdir,updated_at=excluded.updated_at""",
                 (
                     account.id, account.display_name, account.profile_url, int(account.enabled),
                     account.sort_order, account.schedule_time.strftime("%H:%M"),
                     account.monthly_target, account.category, account.secondary_category,
-                    account.personal_category, account.content_directions, account.keywords,
+                    account.personal_category, account.article_type,
+                    account.content_directions, account.keywords,
                     account.article_subdir, now, now,
                 ),
             )
@@ -350,6 +352,7 @@ class Repository:
             category=category if current.category == "AI 智能体" else current.category,
             secondary_category=current.secondary_category,
             personal_category=current.personal_category,
+            article_type=current.article_type,
             content_directions=current.content_directions,
             keywords=current.keywords,
             article_subdir=current.article_subdir,
@@ -377,6 +380,7 @@ class Repository:
             category=str(row["category"]),
             secondary_category=str(row["secondary_category"]),
             personal_category=str(row["personal_category"]),
+            article_type=str(row["article_type"]),
             content_directions=str(row["content_directions"]),
             keywords=str(row["keywords"]),
             article_subdir=str(row["article_subdir"]),

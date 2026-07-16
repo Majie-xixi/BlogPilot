@@ -1,0 +1,3 @@
+-- The accounts table is created by migration 002 for fresh installations.
+-- Existing installations receive article_type through the guarded ALTER TABLE
+-- in Database._migrate_multi_account because SQLite has no ADD COLUMN IF NOT EXISTS.
