@@ -8,6 +8,7 @@ import uuid
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
 from blogpost.ui.theme import COLORS
+from blogpost.ui.widgets import ModernCheckButton
 
 
 class AccountManagerDialog(tk.Toplevel):
@@ -94,15 +95,7 @@ class AccountManagerDialog(tk.Toplevel):
             ttk.Label(form, text=label, style="Field.TLabel").grid(
                 row=row, column=column, sticky="w", padx=(0 if column == 0 else 10, 10 if column == 0 else 0)
             )
-            if name == "article_type":
-                control = ttk.Combobox(
-                    form,
-                    textvariable=self.vars[name],
-                    values=("技术解析", "入门教程", "工程实践", "架构设计", "问题排查", "工具评测"),
-                    style="Modern.TCombobox",
-                )
-            else:
-                control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
+            control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
             control.grid(
                 row=row + 1,
                 column=column,
@@ -116,11 +109,10 @@ class AccountManagerDialog(tk.Toplevel):
         ttk.Entry(form, textvariable=self.vars["keywords"], style="Modern.TEntry").grid(
             row=11, column=0, columnspan=2, sticky="ew", pady=(6, 13)
         )
-        ttk.Checkbutton(
+        ModernCheckButton(
             form,
             text="启用自动生成与发布",
             variable=self.vars["enabled"],
-            style="Modern.TCheckbutton",
         ).grid(row=12, column=0, sticky="w", pady=(2, 0))
         ttk.Label(
             form,
@@ -246,12 +238,11 @@ class BatchPublishDialog(tk.Toplevel):
         for account in accounts:
             row = ttk.Frame(content, style="Card.TFrame", padding=(14, 10))
             row.pack(fill="x", pady=(0, 8))
-            ttk.Checkbutton(
+            ModernCheckButton(
                 row,
                 text=account.display_name,
                 variable=self.vars[account.id],
-                style="Modern.TCheckbutton",
-            ).pack(side="left")
+            ).pack(side="left", fill="x", expand=True)
             ttk.Label(
                 row,
                 text=f"{account.schedule_time:%H:%M} · 目标 {account.monthly_target} 篇",

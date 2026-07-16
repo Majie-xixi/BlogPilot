@@ -86,6 +86,7 @@ class MainWindow:
         self.status_refresh_generation = 0
         self.account_map: dict[str, Account] = {}
         self.current_account_id = DEFAULT_ACCOUNT_ID
+        self.account_popup: tk.Toplevel | None = None
         self._build()
         self._reload_accounts(DEFAULT_ACCOUNT_ID)
         self.refresh()
@@ -113,25 +114,44 @@ class MainWindow:
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
         account_controls = ttk.Frame(header, style="Page.TFrame")
         account_controls.grid(row=0, column=1, rowspan=2, sticky="e")
-        ttk.Label(account_controls, text="当前账号", style="Subtitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(account_controls, text="当前账号", style="Subtitle.TLabel").grid(
+            row=0, column=0, sticky="e", padx=(0, 8)
+        )
         self.account_var = tk.StringVar()
-        self.account_selector = ttk.Combobox(
+        self.account_selector = tk.Button(
             account_controls,
             textvariable=self.account_var,
-            state="readonly",
-            width=18,
-            style="Modern.TCombobox",
+            command=self._toggle_account_popup,
+            background=COLORS["surface"],
+            activebackground=COLORS["surface_alt"],
+            foreground=COLORS["text"],
+            activeforeground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["primary"],
+            font=(FONT, 10),
+            anchor="w",
+            padx=13,
+            pady=8,
+            width=16,
+            cursor="hand2",
         )
-        self.account_selector.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        self.account_selector.bind("<<ComboboxSelected>>", self._on_account_changed)
+        self.account_selector.grid(row=0, column=1, sticky="ew")
         ttk.Button(
             account_controls,
             text="账号管理",
             style="Secondary.TButton",
             command=self.open_account_manager,
-        ).grid(row=0, column=1, rowspan=2, padx=(10, 0))
-        ttk.Button(header, text="全局设置", style="Secondary.TButton", command=self.open_settings).grid(
-            row=0, column=2, rowspan=2, sticky="e", padx=(10, 0)
+        ).grid(row=0, column=2, padx=(10, 0))
+        ttk.Button(
+            account_controls,
+            text="全局设置",
+            style="Secondary.TButton",
+            command=self.open_settings,
+        ).grid(
+            row=0, column=3, padx=(10, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
@@ -323,24 +343,76 @@ class MainWindow:
     def _reload_accounts(self, selected_id: str | None = None) -> None:
         accounts = self.context.accounts()
         self.account_map = {account.id: account for account in accounts}
-        labels = [account.display_name for account in accounts]
-        self.account_selector.configure(values=labels)
         wanted = selected_id if selected_id in self.account_map else accounts[0].id
         self.current_account_id = wanted
         self.account_var.set(self.account_map[wanted].display_name)
 
-    def _on_account_changed(self, _event=None) -> None:
-        selected_name = self.account_var.get()
-        for account in self.account_map.values():
-            if account.display_name == selected_name:
-                self.current_account_id = account.id
-                break
+    def _select_account(self, account_id: str) -> None:
+        if account_id not in self.account_map:
+            return
+        self.current_account_id = account_id
+        self.account_var.set(self.account_map[account_id].display_name)
+        self._close_account_popup()
         self.status_refresh_generation += 1
         self.status_refreshing = False
         self.profile_snapshot = None
         self._clear_log()
         self._load_recent_log()
         self.refresh()
+
+    def _toggle_account_popup(self) -> None:
+        if self.account_popup is not None and self.account_popup.winfo_exists():
+            self._close_account_popup()
+            return
+        popup = tk.Toplevel(self.root)
+        self.account_popup = popup
+        popup.overrideredirect(True)
+        popup.configure(background=COLORS["border"])
+        popup.transient(self.root)
+        width = max(210, self.account_selector.winfo_width())
+        height = 12 + len(self.account_map) * 44
+        x = self.account_selector.winfo_rootx()
+        y = self.account_selector.winfo_rooty() + self.account_selector.winfo_height() + 6
+        popup.geometry(f"{width}x{height}+{x}+{y}")
+        card = tk.Frame(
+            popup,
+            background=COLORS["surface"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=5,
+            pady=5,
+        )
+        card.pack(fill="both", expand=True)
+        for account in self.context.accounts():
+            selected = account.id == self.current_account_id
+            prefix = "●" if selected else " "
+            suffix = "" if account.enabled else "  · 已停用"
+            button = tk.Button(
+                card,
+                text=f"{prefix}  {account.display_name}{suffix}",
+                command=lambda account_id=account.id: self._select_account(account_id),
+                background=COLORS["primary_soft"] if selected else COLORS["surface"],
+                activebackground=COLORS["primary_soft"],
+                foreground=COLORS["primary"] if selected else COLORS["text"],
+                activeforeground=COLORS["primary"],
+                relief="flat",
+                borderwidth=0,
+                anchor="w",
+                padx=12,
+                pady=8,
+                font=(FONT, 9, "bold" if selected else "normal"),
+                cursor="hand2",
+            )
+            button.pack(fill="x")
+        popup.bind("<Escape>", lambda _event: self._close_account_popup())
+        popup.lift()
+        popup.focus_force()
+
+    def _close_account_popup(self) -> None:
+        popup = self.account_popup
+        self.account_popup = None
+        if popup is not None and popup.winfo_exists():
+            popup.destroy()
 
     def open_account_manager(self) -> None:
         AccountManagerDialog(self.root, self.context, self._account_saved)

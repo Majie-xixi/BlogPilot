@@ -9,6 +9,7 @@ from blogpost.application import ApplicationContext
 from blogpost.config import AppConfig
 from blogpost.paths import config_path
 from blogpost.ui.theme import COLORS
+from blogpost.ui.widgets import ModernCheckButton
 
 
 def fit_dialog_geometry(
@@ -124,13 +125,13 @@ class SettingsDialog(Toplevel):
             style="Modern.TEntry",
         )
         self.key_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Checkbutton(
+        ModernCheckButton(
             key_row,
             text="显示",
             variable=self.vars["show_key"],
-            style="Modern.TCheckbutton",
-            command=self._toggle_key,
+            compact=True,
         ).grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.vars["show_key"].trace_add("write", lambda *_args: self._toggle_key())
         ttk.Label(
             api_card,
             textvariable=self.api_key_status,
@@ -152,11 +153,10 @@ class SettingsDialog(Toplevel):
             style="CardDetail.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(3, 14))
 
-        ttk.Checkbutton(
+        ModernCheckButton(
             publish_card,
             text="启用安全试运行（填写编辑器，但不点击最终发布）",
             variable=self.vars["dry_run"],
-            style="Modern.TCheckbutton",
         ).grid(row=2, column=0, sticky="w")
 
         footer = ttk.Frame(shell, style="Surface.TFrame", padding=(30, 14, 30, 20))
@@ -231,7 +231,11 @@ class SettingsDialog(Toplevel):
             self.master.winfo_width(),
             self.master.winfo_height(),
         )
-        width, height, x, y = fit_dialog_geometry(parent, self._work_area())
+        width, height, x, y = fit_dialog_geometry(
+            parent,
+            self._work_area(),
+            preferred=(650, 700),
+        )
         self.minsize(min(560, width), min(440, height))
         self.geometry(f"{width}x{height}+{x}+{y}")
 

@@ -201,22 +201,6 @@ def configure_theme(root: tk.Tk) -> None:
     )
     style.map("Modern.TEntry", bordercolor=[("focus", COLORS["primary"])])
     style.configure(
-        "Modern.TCombobox",
-        fieldbackground=COLORS["surface"],
-        background=COLORS["surface"],
-        foreground=COLORS["text"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["border"],
-        darkcolor=COLORS["border"],
-        arrowsize=14,
-        padding=(10, 7),
-    )
-    style.map(
-        "Modern.TCombobox",
-        fieldbackground=[("readonly", COLORS["surface"])],
-        bordercolor=[("focus", COLORS["primary"])],
-    )
-    style.configure(
         "Modern.TCheckbutton",
         background=COLORS["surface"],
         foreground=COLORS["text"],
