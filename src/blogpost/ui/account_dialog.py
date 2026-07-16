@@ -13,7 +13,7 @@ from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
 from blogpost.publishers.cto51_profile import fetch_profile_snapshot
 from blogpost.ui.theme import COLORS
-from blogpost.ui.widgets import ModernCheckButton
+from blogpost.ui.widgets import ModernCheckButton, RoundedPanel
 
 
 def is_generic_account_name(value: str) -> bool:
@@ -78,8 +78,14 @@ class AccountManagerDialog(tk.Toplevel):
             style="DialogText.TLabel",
         ).grid(row=0, column=1, sticky="e")
 
-        sidebar = ttk.Frame(shell, style="Card.TFrame", padding=(12, 12))
-        sidebar.grid(row=1, column=0, sticky="nsw", pady=(20, 0), padx=(0, 16))
+        sidebar_panel = RoundedPanel(
+            shell,
+            radius=12,
+            padding=(12, 12),
+            outer=COLORS["surface"],
+        )
+        sidebar_panel.grid(row=1, column=0, sticky="nsw", pady=(20, 0), padx=(0, 16))
+        sidebar = sidebar_panel.content
         sidebar.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(sidebar, columns=("status",), show="tree headings", height=16)
         self.tree.heading("#0", text="账号")
@@ -92,8 +98,14 @@ class AccountManagerDialog(tk.Toplevel):
             row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
 
-        form = ttk.Frame(shell, style="Card.TFrame", padding=(22, 18))
-        form.grid(row=1, column=1, sticky="nsew", pady=(20, 0))
+        form_panel = RoundedPanel(
+            shell,
+            radius=12,
+            padding=(22, 18),
+            outer=COLORS["surface"],
+        )
+        form_panel.grid(row=1, column=1, sticky="nsew", pady=(20, 0))
+        form = form_panel.content
         form.columnconfigure(0, weight=1)
         form.columnconfigure(1, weight=1)
         fields = (
@@ -113,7 +125,7 @@ class AccountManagerDialog(tk.Toplevel):
                 row=row, column=column, sticky="w", padx=(0 if column == 0 else 10, 10 if column == 0 else 0)
             )
             if name == "profile_url":
-                control = ttk.Frame(form, style="Card.TFrame")
+                control = ttk.Frame(form, style="Surface.TFrame")
                 self.profile_entry = ttk.Entry(
                     control,
                     textvariable=self.vars[name],
@@ -354,8 +366,14 @@ class BatchPublishDialog(tk.Toplevel):
             style="DialogText.TLabel",
         ).pack(anchor="w", pady=(5, 16))
         for account in accounts:
-            row = ttk.Frame(content, style="Card.TFrame", padding=(14, 10))
-            row.pack(fill="x", pady=(0, 8))
+            row_panel = RoundedPanel(
+                content,
+                radius=10,
+                padding=(14, 10),
+                outer=COLORS["surface"],
+            )
+            row_panel.pack(fill="x", pady=(0, 8))
+            row = row_panel.content
             ModernCheckButton(
                 row,
                 text=account.display_name,

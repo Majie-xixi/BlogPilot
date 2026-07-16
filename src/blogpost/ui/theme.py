@@ -5,16 +5,16 @@ from tkinter import ttk
 
 
 COLORS = {
-    "page": "#F6F8FB",
+    "page": "#FAFAF8",
     "surface": "#FFFFFF",
-    "surface_alt": "#F8FAFC",
-    "border": "#D8E0EA",
-    "text": "#17202B",
-    "muted": "#64748B",
-    "subtle": "#94A3B8",
-    "primary": "#1F9F78",
-    "primary_hover": "#188966",
-    "primary_soft": "#ECFDF3",
+    "surface_alt": "#F7F6F3",
+    "border": "#E3E1DC",
+    "text": "#20201E",
+    "muted": "#74736F",
+    "subtle": "#A09E98",
+    "primary": "#D45F3A",
+    "primary_hover": "#BC4D2B",
+    "primary_soft": "#FFF0EA",
     "success": "#15803D",
     "warning": "#A16207",
     "danger": "#B91C1C",
@@ -37,6 +37,18 @@ def configure_theme(root: tk.Tk) -> None:
     style.configure(
         "Card.TFrame",
         background=COLORS["surface"],
+        borderwidth=0,
+        relief="flat",
+    )
+    style.configure(
+        "StatusCard.TFrame",
+        background=COLORS["surface"],
+        borderwidth=0,
+        relief="flat",
+    )
+    style.configure(
+        "OutlinedCard.TFrame",
+        background=COLORS["surface"],
         borderwidth=1,
         bordercolor=COLORS["border"],
         lightcolor=COLORS["border"],
@@ -58,7 +70,7 @@ def configure_theme(root: tk.Tk) -> None:
         "Title.TLabel",
         background=COLORS["page"],
         foreground=COLORS["text"],
-        font=(FONT, 24, "bold"),
+        font=(FONT, 21, "bold"),
     )
     style.configure(
         "Subtitle.TLabel",
@@ -70,7 +82,7 @@ def configure_theme(root: tk.Tk) -> None:
         "Section.TLabel",
         background=COLORS["page"],
         foreground=COLORS["text"],
-        font=(FONT, 12, "bold"),
+        font=(FONT, 10, "bold"),
     )
     style.configure(
         "CardCaption.TLabel",
@@ -82,7 +94,19 @@ def configure_theme(root: tk.Tk) -> None:
         "CardValue.TLabel",
         background=COLORS["surface"],
         foreground=COLORS["text"],
-        font=(FONT, 14, "bold"),
+        font=(FONT, 13, "bold"),
+    )
+    style.configure(
+        "CardSuccessValue.TLabel",
+        background=COLORS["surface"],
+        foreground=COLORS["success"],
+        font=(FONT, 13, "bold"),
+    )
+    style.configure(
+        "CardWarningValue.TLabel",
+        background=COLORS["surface"],
+        foreground=COLORS["warning"],
+        font=(FONT, 13, "bold"),
     )
     style.configure(
         "CardDetail.TLabel",
@@ -94,7 +118,7 @@ def configure_theme(root: tk.Tk) -> None:
         "HeroTitle.TLabel",
         background=COLORS["surface"],
         foreground=COLORS["text"],
-        font=(FONT, 16, "bold"),
+        font=(FONT, 13, "bold"),
     )
     style.configure(
         "HeroText.TLabel",
@@ -126,41 +150,41 @@ def configure_theme(root: tk.Tk) -> None:
         background=COLORS["primary"],
         foreground="#FFFFFF",
         borderwidth=0,
-        padding=(18, 10),
+        padding=(18, 9),
         font=(FONT, 10, "bold"),
     )
     style.map(
         "Primary.TButton",
-        background=[("disabled", "#AFC5F5"), ("active", COLORS["primary_hover"])],
-        foreground=[("disabled", "#EEF3FF")],
+        background=[("disabled", "#E5B6A6"), ("active", COLORS["primary_hover"])],
+        foreground=[("disabled", "#FFF7F4")],
     )
     style.configure(
         "HeroButton.TButton",
         background=COLORS["primary"],
         foreground="#FFFFFF",
         borderwidth=0,
-        padding=(20, 11),
-        font=(FONT, 10, "bold"),
-    )
-    style.map(
-        "HeroButton.TButton",
-        background=[("active", COLORS["primary_hover"]), ("disabled", "#A7D8C8")],
-        foreground=[("disabled", "#F2FBF8")],
-    )
-    style.configure(
-        "HeroSecondary.TButton",
-        background=COLORS["surface"],
-        foreground=COLORS["primary"],
-        bordercolor=COLORS["primary"],
-        lightcolor=COLORS["primary"],
-        darkcolor=COLORS["primary"],
-        borderwidth=1,
         padding=(20, 10),
         font=(FONT, 10, "bold"),
     )
     style.map(
+        "HeroButton.TButton",
+        background=[("active", COLORS["primary_hover"]), ("disabled", "#E5B6A6")],
+        foreground=[("disabled", "#FFF7F4")],
+    )
+    style.configure(
         "HeroSecondary.TButton",
-        background=[("active", COLORS["primary_soft"]), ("disabled", COLORS["surface_alt"])],
+        background=COLORS["surface"],
+        foreground=COLORS["text"],
+        bordercolor=COLORS["border"],
+        lightcolor=COLORS["border"],
+        darkcolor=COLORS["border"],
+        borderwidth=1,
+        padding=(17, 9),
+        font=(FONT, 9),
+    )
+    style.map(
+        "HeroSecondary.TButton",
+        background=[("active", COLORS["surface_alt"]), ("disabled", COLORS["surface_alt"])],
         foreground=[("disabled", COLORS["subtle"])],
     )
     style.configure(
@@ -171,7 +195,8 @@ def configure_theme(root: tk.Tk) -> None:
         lightcolor=COLORS["border"],
         darkcolor=COLORS["border"],
         borderwidth=1,
-        padding=(14, 8),
+        padding=(13, 7),
+        font=(FONT, 9),
     )
     style.map("Secondary.TButton", background=[("active", COLORS["surface_alt"])])
     style.configure(
@@ -179,8 +204,8 @@ def configure_theme(root: tk.Tk) -> None:
         background=COLORS["page"],
         foreground=COLORS["primary"],
         borderwidth=0,
-        padding=(8, 4),
-        font=(FONT, 9, "bold"),
+        padding=(4, 2),
+        font=(FONT, 9),
     )
     style.map(
         "Link.TButton",

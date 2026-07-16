@@ -9,7 +9,7 @@ from blogpost.application import ApplicationContext
 from blogpost.config import AppConfig
 from blogpost.paths import config_path
 from blogpost.ui.theme import COLORS
-from blogpost.ui.widgets import ModernCheckButton
+from blogpost.ui.widgets import ModernCheckButton, RoundedPanel
 
 
 def fit_dialog_geometry(
@@ -102,8 +102,14 @@ class SettingsDialog(Toplevel):
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.bind("<MouseWheel>", self._on_mousewheel)
 
-        api_card = ttk.Frame(self.scroll_content, style="Card.TFrame", padding=(20, 17))
-        api_card.grid(row=0, column=0, sticky="ew")
+        api_panel = RoundedPanel(
+            self.scroll_content,
+            radius=12,
+            padding=(20, 17),
+            outer=COLORS["surface"],
+        )
+        api_panel.grid(row=0, column=0, sticky="ew")
+        api_card = api_panel.content
         api_card.columnconfigure(0, weight=1)
         ttk.Label(api_card, text="大模型服务", style="CardValue.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -143,8 +149,14 @@ class SettingsDialog(Toplevel):
             style="CardDetail.TLabel",
         ).grid(row=9, column=0, sticky="w", pady=(3, 0))
 
-        publish_card = ttk.Frame(self.scroll_content, style="Card.TFrame", padding=(20, 17))
-        publish_card.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        publish_panel = RoundedPanel(
+            self.scroll_content,
+            radius=12,
+            padding=(20, 17),
+            outer=COLORS["surface"],
+        )
+        publish_panel.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        publish_card = publish_panel.content
         publish_card.columnconfigure(0, weight=1)
         ttk.Label(publish_card, text="全局发布安全", style="CardValue.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(

@@ -21,6 +21,7 @@ from blogpost.ui.account_dialog import (
 )
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
+from blogpost.ui.widgets import RoundedPanel
 
 
 STATUS_TEXT = {
@@ -35,6 +36,20 @@ STATUS_TEXT = {
     RunStatus.NEEDS_REVIEW: "需要人工检查",
     RunStatus.FAILED: "执行失败",
     RunStatus.UNKNOWN: "发布结果待确认",
+}
+
+STATUS_PROGRESS = {
+    RunStatus.QUEUED: 5,
+    RunStatus.PLANNING: 15,
+    RunStatus.GENERATING: 45,
+    RunStatus.VALIDATING: 65,
+    RunStatus.SAVING: 80,
+    RunStatus.PUBLISHING: 92,
+    RunStatus.PUBLISHED: 100,
+    RunStatus.SKIPPED: 100,
+    RunStatus.NEEDS_REVIEW: 100,
+    RunStatus.FAILED: 100,
+    RunStatus.UNKNOWN: 100,
 }
 
 TRIGGER_TEXT = {
@@ -91,6 +106,8 @@ class MainWindow:
         self.account_map: dict[str, Account] = {}
         self.current_account_id = DEFAULT_ACCOUNT_ID
         self.account_popup: tk.Toplevel | None = None
+        self.batch_progress_positions: dict[str, int] = {}
+        self.batch_progress_total = 1
         self._build()
         self._reload_accounts(DEFAULT_ACCOUNT_ID)
         self.refresh()
@@ -100,7 +117,7 @@ class MainWindow:
     def _build(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        page = ttk.Frame(self.root, style="Page.TFrame", padding=(30, 24, 30, 20))
+        page = ttk.Frame(self.root, style="Page.TFrame", padding=(36, 24, 36, 16))
         page.grid(row=0, column=0, sticky="nsew")
         page.columnconfigure(0, weight=1)
         page.rowconfigure(5, weight=1)
@@ -118,9 +135,6 @@ class MainWindow:
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
         account_controls = ttk.Frame(header, style="Page.TFrame")
         account_controls.grid(row=0, column=1, rowspan=2, sticky="e")
-        ttk.Label(account_controls, text="当前账号", style="Subtitle.TLabel").grid(
-            row=0, column=0, sticky="e", padx=(0, 8)
-        )
         self.account_var = tk.StringVar()
         self.account_selector = tk.Button(
             account_controls,
@@ -142,24 +156,24 @@ class MainWindow:
             width=16,
             cursor="hand2",
         )
-        self.account_selector.grid(row=0, column=1, sticky="ew")
+        self.account_selector.grid(row=0, column=0, sticky="ew")
         ttk.Button(
             account_controls,
             text="账号管理",
             style="Secondary.TButton",
             command=self.open_account_manager,
-        ).grid(row=0, column=2, padx=(10, 0))
+        ).grid(row=0, column=1, padx=(8, 0))
         ttk.Button(
             account_controls,
             text="全局设置",
             style="Secondary.TButton",
             command=self.open_settings,
         ).grid(
-            row=0, column=3, padx=(10, 0)
+            row=0, column=2, padx=(8, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
-        stats.grid(row=1, column=0, sticky="ew", pady=(22, 14))
+        stats.grid(row=1, column=0, sticky="ew", pady=(18, 12))
         for column in range(3):
             stats.columnconfigure(column, weight=1, uniform="stats")
         self.today_value_var = tk.StringVar(value="尚未发布")
@@ -172,66 +186,88 @@ class MainWindow:
         self._status_card(stats, 1, "自动计划", self.schedule_value_var, self.schedule_detail_var, COLORS["primary"])
         self._status_card(stats, 2, "发布模式", self.mode_value_var, self.mode_detail_var, COLORS["warning"])
 
-        hero = ttk.Frame(page, style="Hero.TFrame", padding=(24, 17))
-        hero.grid(row=2, column=0, sticky="ew")
+        hero_panel = RoundedPanel(page, radius=12, padding=(18, 14))
+        hero_panel.grid(row=2, column=0, sticky="ew")
+        hero = hero_panel.content
         hero.columnconfigure(0, weight=1)
-        ttk.Label(hero, text="准备生成今天的 AI 技术博文", style="HeroTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.hero_title_var = tk.StringVar(value="准备生成今天的 AI 技术博文")
+        ttk.Label(hero, textvariable=self.hero_title_var, style="HeroTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
         self.progress_var = tk.StringVar(value="准备就绪 · 点击右侧按钮即可开始")
         ttk.Label(hero, textvariable=self.progress_var, style="HeroText.TLabel").grid(
             row=1, column=0, sticky="w", pady=(6, 0)
         )
         hero_actions = ttk.Frame(hero, style="Surface.TFrame")
         hero_actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=(24, 0))
-        self.run_button = ttk.Button(
-            hero_actions,
-            text="立即生成并发布",
-            style="HeroButton.TButton",
-            command=self.run_now,
-        )
-        self.run_button.grid(row=0, column=0, sticky="ew")
         self.batch_button = ttk.Button(
             hero_actions,
             text="批量依次发布",
             style="HeroSecondary.TButton",
             command=self.open_batch_publish,
         )
-        self.batch_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.batch_button.grid(row=0, column=0, sticky="ew")
+        self.run_button = ttk.Button(
+            hero_actions,
+            text="立即生成并发布 →",
+            style="HeroButton.TButton",
+            command=self.run_now,
+        )
+        self.run_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.progress_frame = ttk.Frame(hero, style="Surface.TFrame")
+        self.progress_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.progress_frame.columnconfigure(0, weight=1)
         self.progressbar = ttk.Progressbar(
-            hero,
+            self.progress_frame,
             mode="determinate",
             value=0,
+            maximum=100,
             style="App.Horizontal.TProgressbar",
         )
-        self.progressbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(13, 0))
+        self.progressbar.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.progress_step_var = tk.StringVar(value="")
+        self.progress_pct_var = tk.StringVar(value="0%")
+        ttk.Label(
+            self.progress_frame,
+            textvariable=self.progress_step_var,
+            style="HeroText.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(
+            self.progress_frame,
+            textvariable=self.progress_pct_var,
+            style="HeroText.TLabel",
+        ).grid(row=1, column=1, sticky="e", pady=(5, 0))
+        self.progress_frame.grid_remove()
 
         actions = ttk.Frame(page, style="Page.TFrame")
-        actions.grid(row=3, column=0, sticky="ew", pady=(14, 18))
+        actions.grid(row=3, column=0, sticky="ew", pady=(14, 14))
+        actions.columnconfigure(0, weight=1)
+        ttk.Label(actions, text="常用操作", style="Subtitle.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 7)
+        )
+        action_buttons = ttk.Frame(actions, style="Page.TFrame")
+        action_buttons.grid(row=1, column=0, sticky="ew")
         for column in range(6):
-            actions.columnconfigure(column, weight=1, uniform="actions")
-        for row, column, text, command in (
-            (0, 0, "打开 51CTO", self.open_profile),
-            (0, 1, "自动发布登录", self.open_login),
-            (0, 2, "更新每日任务", self.install_schedule),
-            (0, 3, "打开最近文章", self.open_latest_article),
-            (0, 4, "打开文章目录", self.open_generated_dir),
+            action_buttons.columnconfigure(column, weight=1, uniform="actions")
+        for column, text, command in (
+            (0, "打开 51CTO", self.open_profile),
+            (1, "自动发布登录", self.open_login),
+            (2, "更新每日任务", self.install_schedule),
+            (3, "打开最近文章", self.open_latest_article),
+            (4, "打开文章目录", self.open_generated_dir),
+            (5, "重新发布最近文章", self.retry_latest_article),
         ):
-            button = ttk.Button(actions, text=text, style="Secondary.TButton", command=command)
+            button = ttk.Button(action_buttons, text=text, style="Secondary.TButton", command=command)
             button.grid(
-                row=row,
+                row=0,
                 column=column,
                 sticky="ew",
                 padx=(0 if column == 0 else 4, 0 if column == 5 else 4),
             )
             if text == "打开最近文章":
                 self.latest_article_button = button
-
-        self.retry_button = ttk.Button(
-            actions,
-            text="重新发布最近文章",
-            style="Secondary.TButton",
-            command=self.retry_latest_article,
-        )
-        self.retry_button.grid(row=0, column=5, sticky="ew", padx=(4, 0))
+            elif text == "重新发布最近文章":
+                self.retry_button = button
 
         section = ttk.Frame(page, style="Page.TFrame")
         section.grid(row=4, column=0, sticky="ew", pady=(0, 7))
@@ -258,17 +294,18 @@ class MainWindow:
         detail_stack.grid(row=5, column=0, sticky="nsew")
         detail_stack.columnconfigure(0, weight=1)
         detail_stack.rowconfigure(0, weight=1)
-        self.log_view = ttk.Frame(detail_stack, style="Card.TFrame", padding=1)
-        self.history_view = ttk.Frame(detail_stack, style="Card.TFrame", padding=1)
+        self.log_view = RoundedPanel(detail_stack, radius=10, padding=(1, 1))
+        self.history_view = RoundedPanel(detail_stack, radius=10, padding=(1, 1))
         self.log_view.grid(row=0, column=0, sticky="nsew")
         self.history_view.grid(row=0, column=0, sticky="nsew")
-        self.log_view.tkraise()
+        self.history_view.grid_remove()
         self.detail_view = "log"
 
-        self.log_view.columnconfigure(0, weight=1)
-        self.log_view.rowconfigure(0, weight=1)
+        log_content = self.log_view.content
+        log_content.columnconfigure(0, weight=1)
+        log_content.rowconfigure(0, weight=1)
         self.log_text = tk.Text(
-            self.log_view,
+            log_content,
             wrap="word",
             state="disabled",
             background=COLORS["surface"],
@@ -279,8 +316,9 @@ class MainWindow:
             font=("Cascadia Mono", 9),
             padx=14,
             pady=12,
+            height=8,
         )
-        log_scrollbar = ttk.Scrollbar(self.log_view, orient="vertical", command=self.log_text.yview)
+        log_scrollbar = ttk.Scrollbar(log_content, orient="vertical", command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=log_scrollbar.set)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scrollbar.grid(row=0, column=1, sticky="ns")
@@ -297,10 +335,11 @@ class MainWindow:
         self.log_text.tag_configure("keyword_deepseek", foreground="#7C3AED", font=("Cascadia Mono", 9, "bold"))
         self.log_text.tag_configure("keyword_markdown", foreground="#A16207", font=("Cascadia Mono", 9, "bold"))
 
-        self.history_view.columnconfigure(0, weight=1)
-        self.history_view.rowconfigure(0, weight=1)
+        history_content = self.history_view.content
+        history_content.columnconfigure(0, weight=1)
+        history_content.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
-            self.history_view,
+            history_content,
             columns=("time", "trigger", "status", "message"),
             show="headings",
             selectmode="browse",
@@ -313,7 +352,7 @@ class MainWindow:
         ):
             self.tree.heading(name, text=text)
             self.tree.column(name, width=width, minwidth=width, stretch=stretch, anchor="w")
-        self.history_scrollbar = ttk.Scrollbar(self.history_view, orient="vertical", command=self.tree.yview)
+        self.history_scrollbar = ttk.Scrollbar(history_content, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.history_scrollbar.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.history_scrollbar.grid(row=0, column=1, sticky="ns")
@@ -333,14 +372,27 @@ class MainWindow:
         ).pack(side="left", padx=(7, 0))
 
     def _status_card(self, parent, column, caption, value_var, detail_var, dot_color) -> None:
-        card = ttk.Frame(parent, style="Card.TFrame", padding=(18, 15))
-        card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0 if column == 2 else 6))
+        panel = RoundedPanel(parent, radius=12, padding=(15, 13))
+        panel.grid(
+            row=0,
+            column=column,
+            sticky="nsew",
+            padx=(0 if column == 0 else 6, 0 if column == 2 else 6),
+        )
+        card = panel.content
         card.columnconfigure(1, weight=1)
         tk.Label(card, text="●", foreground=dot_color, background=COLORS["surface"], font=(FONT, 8)).grid(
             row=0, column=0, sticky="w", padx=(0, 7)
         )
         ttk.Label(card, text=caption, style="CardCaption.TLabel").grid(row=0, column=1, sticky="w")
-        ttk.Label(card, textvariable=value_var, style="CardValue.TLabel").grid(
+        value_style = (
+            "CardSuccessValue.TLabel"
+            if caption == "今日状态"
+            else "CardWarningValue.TLabel"
+            if caption == "发布模式"
+            else "CardValue.TLabel"
+        )
+        ttk.Label(card, textvariable=value_var, style=value_style).grid(
             row=1, column=0, columnspan=2, sticky="w", pady=(8, 3)
         )
         ttk.Label(card, textvariable=detail_var, style="CardDetail.TLabel").grid(
@@ -678,9 +730,41 @@ class MainWindow:
         self._clear_log()
         self._show_empty_log()
 
+    def _show_progress(self, title: str, message: str, percent: int) -> None:
+        value = max(0, min(100, int(percent)))
+        self.hero_title_var.set(title)
+        self.progress_var.set(message)
+        self.progress_step_var.set(message)
+        self.progress_pct_var.set(f"{value}%")
+        self.progressbar.configure(mode="determinate", maximum=100, value=value)
+        self.progress_frame.grid()
+
+    def _update_stage_progress(self, status: RunStatus, message: str) -> None:
+        percent = STATUS_PROGRESS.get(status, 5)
+        self._show_progress(
+            "正在生成今天的 AI 技术博文",
+            f"{STATUS_TEXT.get(status, status.value)} · {message}",
+            percent,
+        )
+
+    def _complete_progress(self, message: str) -> None:
+        self.progressbar.configure(mode="determinate", maximum=100, value=100)
+        self.progress_step_var.set(message)
+        self.progress_pct_var.set("100%")
+        self.root.after(1800, self._reset_progress_if_idle)
+
+    def _reset_progress_if_idle(self) -> None:
+        if self.running:
+            return
+        self.progress_frame.grid_remove()
+        self.hero_title_var.set("准备生成今天的 AI 技术博文")
+        self.progress_var.set("准备就绪 · 点击右侧按钮即可开始")
+        self.run_button.configure(text="立即生成并发布 →")
+
     def _show_log_view(self) -> None:
         self.detail_view = "log"
-        self.log_view.tkraise()
+        self.history_view.grid_remove()
+        self.log_view.grid(row=0, column=0, sticky="nsew")
         self.detail_title_var.set("运行日志")
         self.detail_hint_var.set("生成、检查、保存和发布步骤会实时显示")
         self.detail_toggle_button.configure(text="查看历史记录")
@@ -689,7 +773,8 @@ class MainWindow:
     def _toggle_detail_view(self) -> None:
         if self.detail_view == "log":
             self.detail_view = "history"
-            self.history_view.tkraise()
+            self.log_view.grid_remove()
+            self.history_view.grid(row=0, column=0, sticky="nsew")
             self.detail_title_var.set("历史记录")
             self.detail_hint_var.set("最多显示最近 30 次运行结果")
             self.detail_toggle_button.configure(text="返回运行日志")
@@ -725,9 +810,8 @@ class MainWindow:
         self._clear_log()
         self._append_log("任务已启动，正在准备历史语料和选题。")
         self._show_log_view()
-        self.progress_var.set("任务已启动 · 正在准备选题")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start(12)
+        self._show_progress("正在生成今天的 AI 技术博文", "正在准备历史语料和选题…", 5)
+        self.run_button.configure(text="生成中…")
         self.run_button.configure(state="disabled")
         self.batch_button.configure(state="disabled")
         self.retry_button.configure(state="disabled")
@@ -751,9 +835,8 @@ class MainWindow:
         self._clear_log()
         self._show_log_view()
         self._append_log(f"正在读取已保存文章：{path.name}")
-        self.progress_var.set("正在重新发布 · 不会重新生成文章")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start(12)
+        self._show_progress("正在重新发布已保存文章", "正在读取文章 · 不会重新生成", 10)
+        self.run_button.configure(text="发布中…")
         self.run_button.configure(state="disabled")
         self.retry_button.configure(state="disabled")
         self.batch_button.configure(state="disabled")
@@ -791,8 +874,22 @@ class MainWindow:
         self.running = True
         self._clear_log()
         self._show_log_view()
-        self.progress_var.set(f"批量任务已启动 · 共 {len(account_ids)} 个账号")
-        self.progressbar.configure(mode="determinate", value=0, maximum=max(1, len(account_ids)))
+        accounts = {
+            account.id: account
+            for account in self.context.accounts(enabled_only=True)
+            if account.id in account_ids
+        }
+        ordered_names = [accounts[account_id].display_name for account_id in account_ids if account_id in accounts]
+        self.batch_progress_positions = {
+            account_name: index for index, account_name in enumerate(ordered_names)
+        }
+        self.batch_progress_total = max(1, len(ordered_names))
+        self._show_progress(
+            "正在依次处理多个账号",
+            f"批量任务已启动 · 共 {len(account_ids)} 个账号",
+            0,
+        )
+        self.run_button.configure(text="处理中…")
         self.run_button.configure(state="disabled")
         self.batch_button.configure(state="disabled")
         self.retry_button.configure(state="disabled")
@@ -814,13 +911,20 @@ class MainWindow:
                 event = self.queue.get_nowait()
                 if event[0] == "progress":
                     _, status, message = event
-                    self.progress_var.set(f"{STATUS_TEXT.get(status, status.value)} · {message}")
+                    self._update_stage_progress(status, message)
                     tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
                     self._append_log(f"{STATUS_TEXT.get(status, status.value)}：{message}", tag)
                 elif event[0] == "batch_progress":
                     _, account_name, status, message = event
-                    self.progress_var.set(
-                        f"{account_name} · {STATUS_TEXT.get(status, status.value)} · {message}"
+                    index = self.batch_progress_positions.get(account_name, 0)
+                    stage = STATUS_PROGRESS.get(status, 5) / 100
+                    percent = round(
+                        ((index + stage) / max(1, self.batch_progress_total)) * 100
+                    )
+                    self._show_progress(
+                        "正在依次处理多个账号",
+                        f"{account_name} · {STATUS_TEXT.get(status, status.value)} · {message}",
+                        percent,
                     )
                     tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
                     self._append_log(
@@ -839,11 +943,11 @@ class MainWindow:
 
     def _finish_run(self, result) -> None:
         self.running = False
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate", value=100)
         self.run_button.configure(state="normal")
+        self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
         self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
+        self._complete_progress(self.progress_var.get())
         self.refresh()
         if result.status == RunStatus.PUBLISHED:
             self._show_publish_success(result.url)
@@ -857,15 +961,15 @@ class MainWindow:
 
     def _finish_batch(self, results: list[tuple[Account, PublishResult]]) -> None:
         self.running = False
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate", maximum=max(1, len(results)), value=len(results))
         self.run_button.configure(state="normal")
+        self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
         self.retry_button.configure(state="normal")
         success = sum(result.status == RunStatus.PUBLISHED for _account, result in results)
         failed = sum(result.status in {RunStatus.FAILED, RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW} for _account, result in results)
         skipped = len(results) - success - failed
         self.progress_var.set(f"批量任务完成 · 成功 {success} · 失败/待处理 {failed} · 跳过 {skipped}")
+        self._complete_progress(self.progress_var.get())
         self.refresh()
         self._show_batch_summary(results)
 
@@ -883,8 +987,14 @@ class MainWindow:
             style="DialogText.TLabel",
         ).pack(anchor="w", pady=(5, 16))
         for account, result in results:
-            row = ttk.Frame(content, style="Card.TFrame", padding=(14, 10))
-            row.pack(fill="x", pady=(0, 8))
+            row_panel = RoundedPanel(
+                content,
+                radius=10,
+                padding=(14, 10),
+                outer=COLORS["surface"],
+            )
+            row_panel.pack(fill="x", pady=(0, 8))
+            row = row_panel.content
             color = COLORS["success"] if result.status == RunStatus.PUBLISHED else COLORS["danger"] if result.status in {RunStatus.FAILED, RunStatus.UNKNOWN} else COLORS["warning"]
             tk.Label(row, text="●", foreground=color, background=COLORS["surface"]).pack(side="left")
             ttk.Label(row, text=account.display_name, style="CardValue.TLabel").pack(side="left", padx=(8, 0))
