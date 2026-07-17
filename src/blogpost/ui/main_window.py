@@ -21,7 +21,7 @@ from blogpost.ui.account_dialog import (
 )
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
-from blogpost.ui.widgets import RoundedPanel
+from blogpost.ui.widgets import RoundedButton, RoundedPanel
 
 
 STATUS_TEXT = {
@@ -136,38 +136,33 @@ class MainWindow:
         account_controls = ttk.Frame(header, style="Page.TFrame")
         account_controls.grid(row=0, column=1, rowspan=2, sticky="e")
         self.account_var = tk.StringVar()
-        self.account_selector = tk.Button(
+        self.account_selector = RoundedButton(
             account_controls,
             textvariable=self.account_var,
             command=self._toggle_account_popup,
-            background=COLORS["surface"],
-            activebackground=COLORS["surface_alt"],
-            foreground=COLORS["text"],
-            activeforeground=COLORS["text"],
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            highlightcolor=COLORS["primary"],
+            variant="secondary",
+            min_width=158,
+            height=36,
+            radius=8,
             font=(FONT, 10),
             anchor="w",
-            padx=13,
-            pady=8,
-            width=16,
-            cursor="hand2",
+            padding_x=13,
+            outer=COLORS["page"],
         )
         self.account_selector.grid(row=0, column=0, sticky="ew")
-        ttk.Button(
+        RoundedButton(
             account_controls,
             text="账号管理",
-            style="Secondary.TButton",
             command=self.open_account_manager,
+            variant="secondary",
+            outer=COLORS["page"],
         ).grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(
+        RoundedButton(
             account_controls,
             text="全局设置",
-            style="Secondary.TButton",
             command=self.open_settings,
+            variant="secondary",
+            outer=COLORS["page"],
         ).grid(
             row=0, column=2, padx=(8, 0)
         )
@@ -200,18 +195,23 @@ class MainWindow:
         )
         hero_actions = ttk.Frame(hero, style="Surface.TFrame")
         hero_actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=(24, 0))
-        self.batch_button = ttk.Button(
+        self.batch_button = RoundedButton(
             hero_actions,
             text="批量依次发布",
-            style="HeroSecondary.TButton",
             command=self.open_batch_publish,
+            variant="secondary",
+            height=36,
+            outer=COLORS["surface"],
         )
         self.batch_button.grid(row=0, column=0, sticky="ew")
-        self.run_button = ttk.Button(
+        self.run_button = RoundedButton(
             hero_actions,
             text="立即生成并发布 →",
-            style="HeroButton.TButton",
             command=self.run_now,
+            variant="primary",
+            min_width=150,
+            height=36,
+            outer=COLORS["surface"],
         )
         self.run_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.progress_frame = ttk.Frame(hero, style="Surface.TFrame")
@@ -251,13 +251,19 @@ class MainWindow:
             action_buttons.columnconfigure(column, weight=1, uniform="actions")
         for column, text, command in (
             (0, "打开 51CTO", self.open_profile),
-            (1, "自动发布登录", self.open_login),
+            (1, "登录当前账号", self.open_login),
             (2, "更新每日任务", self.install_schedule),
             (3, "打开最近文章", self.open_latest_article),
             (4, "打开文章目录", self.open_generated_dir),
             (5, "重新发布最近文章", self.retry_latest_article),
         ):
-            button = ttk.Button(action_buttons, text=text, style="Secondary.TButton", command=command)
+            button = RoundedButton(
+                action_buttons,
+                text=text,
+                command=command,
+                variant="secondary",
+                outer=COLORS["page"],
+            )
             button.grid(
                 row=0,
                 column=column,
@@ -268,6 +274,8 @@ class MainWindow:
                 self.latest_article_button = button
             elif text == "重新发布最近文章":
                 self.retry_button = button
+            elif text == "登录当前账号":
+                self.login_button = button
 
         section = ttk.Frame(page, style="Page.TFrame")
         section.grid(row=4, column=0, sticky="ew", pady=(0, 7))
@@ -278,15 +286,22 @@ class MainWindow:
         ttk.Label(section, textvariable=self.detail_hint_var, style="Subtitle.TLabel").grid(
             row=0, column=1, sticky="e", padx=(0, 12)
         )
-        self.detail_toggle_button = ttk.Button(
-            section, text="查看历史记录", style="Link.TButton", command=self._toggle_detail_view
+        self.detail_toggle_button = RoundedButton(
+            section,
+            text="查看历史记录",
+            variant="link",
+            height=28,
+            command=self._toggle_detail_view,
+            outer=COLORS["page"],
         )
         self.detail_toggle_button.grid(row=0, column=2, sticky="e", padx=(0, 8))
-        self.clear_log_button = ttk.Button(
+        self.clear_log_button = RoundedButton(
             section,
             text="清空日志",
-            style="Link.TButton",
+            variant="link",
+            height=28,
             command=self._clear_log_and_show_empty,
+            outer=COLORS["page"],
         )
         self.clear_log_button.grid(row=0, column=3, sticky="e")
 
@@ -408,19 +423,24 @@ class MainWindow:
         self.account_map = {account.id: account for account in accounts}
         wanted = selected_id if selected_id in self.account_map else accounts[0].id
         self.current_account_id = wanted
-        self.account_var.set(self.account_map[wanted].display_name)
+        self._show_account_name(self.account_map[wanted])
+
+    def _show_account_name(self, account: Account) -> None:
+        self.account_var.set(account.display_name)
+        self.login_button.configure(text=f"登录 · {account.display_name}")
 
     def _select_account(self, account_id: str) -> None:
         if account_id not in self.account_map:
             return
         self.current_account_id = account_id
-        self.account_var.set(self.account_map[account_id].display_name)
+        self._show_account_name(self.account_map[account_id])
         self._close_account_popup()
         self.status_refresh_generation += 1
         self.status_refreshing = False
         self.profile_snapshot = None
         self._clear_log()
         self._show_empty_log()
+        self._reset_progress_if_idle()
         self.refresh()
 
     def _toggle_account_popup(self) -> None:
@@ -450,21 +470,17 @@ class MainWindow:
             selected = account.id == self.current_account_id
             prefix = "●" if selected else " "
             suffix = "" if account.enabled else "  · 已停用"
-            button = tk.Button(
+            button = RoundedButton(
                 card,
                 text=f"{prefix}  {account.display_name}{suffix}",
                 command=lambda account_id=account.id: self._select_account(account_id),
-                background=COLORS["primary_soft"] if selected else COLORS["surface"],
-                activebackground=COLORS["primary_soft"],
-                foreground=COLORS["primary"] if selected else COLORS["text"],
-                activeforeground=COLORS["primary"],
-                relief="flat",
-                borderwidth=0,
+                variant="toggle",
+                selected=selected,
                 anchor="w",
-                padx=12,
-                pady=8,
+                padding_x=12,
+                height=38,
                 font=(FONT, 9, "bold" if selected else "normal"),
-                cursor="hand2",
+                outer=COLORS["surface"],
             )
             button.pack(fill="x")
         popup.bind("<Escape>", lambda _event: self._close_account_popup())
@@ -638,7 +654,7 @@ class MainWindow:
                         replace(self.current_account, display_name=snapshot.display_name)
                     )
                     self.account_map[account_id] = saved
-                    self.account_var.set(saved.display_name)
+                    self._show_account_name(saved)
                 except Exception:
                     pass
             if (
@@ -751,7 +767,6 @@ class MainWindow:
         self.progressbar.configure(mode="determinate", maximum=100, value=100)
         self.progress_step_var.set(message)
         self.progress_pct_var.set("100%")
-        self.root.after(1800, self._reset_progress_if_idle)
 
     def _reset_progress_if_idle(self) -> None:
         if self.running:
@@ -999,7 +1014,13 @@ class MainWindow:
             tk.Label(row, text="●", foreground=color, background=COLORS["surface"]).pack(side="left")
             ttk.Label(row, text=account.display_name, style="CardValue.TLabel").pack(side="left", padx=(8, 0))
             ttk.Label(row, text=STATUS_TEXT.get(result.status, result.status.value), style="CardDetail.TLabel").pack(side="right")
-        ttk.Button(content, text="完成", style="Primary.TButton", command=dialog.destroy).pack(
+        RoundedButton(
+            content,
+            text="完成",
+            variant="primary",
+            command=dialog.destroy,
+            outer=COLORS["surface"],
+        ).pack(
             anchor="e", pady=(12, 0)
         )
         dialog.update_idletasks()
@@ -1045,13 +1066,25 @@ class MainWindow:
 
         actions = tk.Frame(content, background=COLORS["surface"])
         actions.pack(fill="x", pady=(24, 0))
-        ttk.Button(actions, text="稍后", style="Secondary.TButton", command=dialog.destroy).pack(side="right")
+        RoundedButton(
+            actions,
+            text="稍后",
+            variant="secondary",
+            command=dialog.destroy,
+            outer=COLORS["surface"],
+        ).pack(side="right")
         if url:
             def open_article() -> None:
                 dialog.destroy()
                 webbrowser.open(url)
 
-            ttk.Button(actions, text="打开文章", style="Primary.TButton", command=open_article).pack(
+            RoundedButton(
+                actions,
+                text="打开文章",
+                variant="primary",
+                command=open_article,
+                outer=COLORS["surface"],
+            ).pack(
                 side="right", padx=(0, 10)
             )
 

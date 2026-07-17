@@ -1,8 +1,91 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import font as tkfont
+from tkinter import ttk
 
 from blogpost.ui.theme import COLORS, FONT
+
+
+def _master_background(master) -> str:
+    try:
+        return str(master.cget("background"))
+    except tk.TclError:
+        pass
+    try:
+        style_name = str(master.cget("style")) or f"{master.winfo_class()}"
+        return str(ttk.Style(master).lookup(style_name, "background") or COLORS["page"])
+    except (AttributeError, tk.TclError):
+        return COLORS["page"]
+
+
+def _draw_rounded_rectangle(
+    canvas: tk.Canvas,
+    *,
+    tag: str,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    radius: int,
+    fill: str,
+    outline: str,
+    width: int = 1,
+) -> None:
+    radius = max(1, min(radius, (x2 - x1) // 2, (y2 - y1) // 2))
+    diameter = radius * 2
+    canvas.create_rectangle(
+        x1 + radius,
+        y1,
+        x2 - radius,
+        y2,
+        fill=fill,
+        outline="",
+        tags=tag,
+    )
+    canvas.create_rectangle(
+        x1,
+        y1 + radius,
+        x2,
+        y2 - radius,
+        fill=fill,
+        outline="",
+        tags=tag,
+    )
+    for left, top, start in (
+        (x1, y1, 90),
+        (x2 - diameter, y1, 0),
+        (x2 - diameter, y2 - diameter, 270),
+        (x1, y2 - diameter, 180),
+    ):
+        canvas.create_arc(
+            left,
+            top,
+            left + diameter,
+            top + diameter,
+            start=start,
+            extent=90,
+            style="pieslice",
+            fill=fill,
+            outline=fill,
+            tags=tag,
+        )
+        canvas.create_arc(
+            left,
+            top,
+            left + diameter,
+            top + diameter,
+            start=start,
+            extent=90,
+            style="arc",
+            outline=outline,
+            width=width,
+            tags=tag,
+        )
+    canvas.create_line(x1 + radius, y1, x2 - radius, y1, fill=outline, width=width, tags=tag)
+    canvas.create_line(x2, y1 + radius, x2, y2 - radius, fill=outline, width=width, tags=tag)
+    canvas.create_line(x2 - radius, y2, x1 + radius, y2, fill=outline, width=width, tags=tag)
+    canvas.create_line(x1, y2 - radius, x1, y1 + radius, fill=outline, width=width, tags=tag)
 
 
 class RoundedPanel(tk.Canvas):
@@ -52,74 +135,17 @@ class RoundedPanel(tk.Canvas):
         width = max(2, self.winfo_width())
         height = max(2, self.winfo_height())
         self.delete("panel-shape")
-        radius = min(self.radius, width // 2, height // 2)
-        diameter = radius * 2
-        self.create_rectangle(
-            radius,
-            1,
-            width - radius,
-            height - 1,
+        _draw_rounded_rectangle(
+            self,
+            tag="panel-shape",
+            x1=1,
+            y1=1,
+            x2=width - 1,
+            y2=height - 1,
+            radius=self.radius,
             fill=self.fill,
-            outline="",
-            tags="panel-shape",
+            outline=self.border,
         )
-        self.create_rectangle(
-            1,
-            radius,
-            width - 1,
-            height - radius,
-            fill=self.fill,
-            outline="",
-            tags="panel-shape",
-        )
-        for x1, y1, start in (
-            (1, 1, 90),
-            (width - diameter - 1, 1, 0),
-            (width - diameter - 1, height - diameter - 1, 270),
-            (1, height - diameter - 1, 180),
-        ):
-            self.create_arc(
-                x1,
-                y1,
-                x1 + diameter,
-                y1 + diameter,
-                start=start,
-                extent=90,
-                style="pieslice",
-                fill=self.fill,
-                outline=self.fill,
-                tags="panel-shape",
-            )
-            self.create_arc(
-                x1,
-                y1,
-                x1 + diameter,
-                y1 + diameter,
-                start=start,
-                extent=90,
-                style="arc",
-                outline=self.border,
-                width=1,
-                tags="panel-shape",
-            )
-        self.create_line(radius, 1, width - radius, 1, fill=self.border, tags="panel-shape")
-        self.create_line(
-            width - 1,
-            radius,
-            width - 1,
-            height - radius,
-            fill=self.border,
-            tags="panel-shape",
-        )
-        self.create_line(
-            width - radius,
-            height - 1,
-            radius,
-            height - 1,
-            fill=self.border,
-            tags="panel-shape",
-        )
-        self.create_line(1, height - radius, 1, radius, fill=self.border, tags="panel-shape")
         self.tag_lower("panel-shape")
         left, top, right, bottom = self.insets
         self.coords(self._window, left, top)
@@ -130,7 +156,204 @@ class RoundedPanel(tk.Canvas):
         )
 
 
-class ModernCheckButton(tk.Button):
+class RoundedButton(tk.Canvas):
+    """Modern rounded button with the subset of Button API used by the app."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        text: str = "",
+        textvariable: tk.StringVar | None = None,
+        command=None,
+        variant: str = "secondary",
+        min_width: int = 0,
+        height: int = 36,
+        radius: int = 8,
+        anchor: str = "center",
+        padding_x: int = 14,
+        font: tuple | None = None,
+        outer: str | None = None,
+        selected: bool = False,
+        **kwargs,
+    ):
+        self._text = text
+        self._textvariable = textvariable
+        self._command = command
+        self._variant = variant
+        self._state = "normal"
+        self._selected = selected
+        self._hovered = False
+        self._pressed = False
+        self._anchor = anchor
+        self._padding_x = padding_x
+        self._min_width = min_width
+        self._height = height
+        self._radius = radius
+        self._font_spec = font or (FONT, 9, "bold" if variant == "primary" else "normal")
+        background = outer or _master_background(master)
+        tk.Canvas.__init__(
+            self,
+            master,
+            background=background,
+            borderwidth=0,
+            highlightthickness=0,
+            height=height,
+            takefocus=True,
+            cursor="hand2",
+            **kwargs,
+        )
+        if textvariable is not None:
+            textvariable.trace_add("write", self._variable_changed)
+        self.bind("<Configure>", self._draw)
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<ButtonPress-1>", self._press)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Key-Return>", self._invoke_from_key)
+        self.bind("<Key-space>", self._invoke_from_key)
+        self.bind("<FocusIn>", self._draw)
+        self.bind("<FocusOut>", self._draw)
+        self._update_requested_width()
+        self.after_idle(self._draw)
+
+    def _display_text(self) -> str:
+        return self._textvariable.get() if self._textvariable is not None else self._text
+
+    def _variable_changed(self, *_args) -> None:
+        if self.winfo_exists():
+            self._update_requested_width()
+            self._draw()
+
+    def _update_requested_width(self) -> None:
+        measured = tkfont.Font(font=self._font_spec).measure(self._display_text())
+        self.configure(width=max(self._min_width, measured + self._padding_x * 2))
+
+    def _palette(self) -> tuple[str, str, str]:
+        if self._state == "disabled":
+            return COLORS["surface_alt"], COLORS["border"], COLORS["subtle"]
+        if self._variant == "primary":
+            return (
+                COLORS["primary_hover"] if self._hovered or self._pressed else COLORS["primary"],
+                COLORS["primary_hover"] if self._hovered else COLORS["primary"],
+                "#FFFFFF",
+            )
+        if self._variant == "link":
+            outer = str(self.cget("background"))
+            return (
+                COLORS["primary_soft"] if self._hovered else outer,
+                COLORS["primary_soft"] if self._hovered else outer,
+                COLORS["primary_hover"] if self._hovered else COLORS["primary"],
+            )
+        if self._variant == "toggle" and self._selected:
+            return COLORS["primary_soft"], COLORS["primary"], COLORS["primary"]
+        return (
+            COLORS["surface_alt"] if self._hovered or self._pressed else COLORS["surface"],
+            COLORS["primary"] if self.focus_get() is self else COLORS["border"],
+            COLORS["text"],
+        )
+
+    def _draw(self, _event=None) -> None:
+        if not self.winfo_exists():
+            return
+        self.delete("button-shape")
+        self.delete("button-label")
+        width = max(2, self.winfo_width())
+        height = max(2, self.winfo_height())
+        fill, outline, foreground = self._palette()
+        _draw_rounded_rectangle(
+            self,
+            tag="button-shape",
+            x1=1,
+            y1=1,
+            x2=width - 1,
+            y2=height - 1,
+            radius=self._radius,
+            fill=fill,
+            outline=outline,
+        )
+        if self._anchor == "w":
+            x = self._padding_x
+            anchor = "w"
+        else:
+            x = width // 2
+            anchor = "center"
+        self.create_text(
+            x,
+            height // 2,
+            text=self._display_text(),
+            fill=foreground,
+            font=self._font_spec,
+            anchor=anchor,
+            tags="button-label",
+        )
+
+    def _enter(self, _event=None) -> None:
+        if self._state != "disabled":
+            self._hovered = True
+            self._draw()
+
+    def _leave(self, _event=None) -> None:
+        self._hovered = False
+        self._pressed = False
+        self._draw()
+
+    def _press(self, _event=None) -> None:
+        if self._state != "disabled":
+            self.focus_set()
+            self._pressed = True
+            self._draw()
+
+    def _release(self, event) -> None:
+        if self._state == "disabled":
+            return
+        inside = 0 <= event.x < self.winfo_width() and 0 <= event.y < self.winfo_height()
+        self._pressed = False
+        self._draw()
+        if inside and self._command is not None:
+            self._command()
+
+    def _invoke_from_key(self, _event=None) -> str:
+        if self._state != "disabled" and self._command is not None:
+            self._command()
+        return "break"
+
+    def configure(self, cnf=None, **kwargs):
+        options = dict(cnf or {})
+        options.update(kwargs)
+        redraw = False
+        if "text" in options:
+            self._text = str(options.pop("text"))
+            redraw = True
+        if "textvariable" in options:
+            self._textvariable = options.pop("textvariable")
+            redraw = True
+        if "command" in options:
+            self._command = options.pop("command")
+        if "state" in options:
+            self._state = str(options.pop("state"))
+            self.configure(cursor="arrow" if self._state == "disabled" else "hand2")
+            redraw = True
+        if "selected" in options:
+            self._selected = bool(options.pop("selected"))
+            redraw = True
+        result = tk.Canvas.configure(self, **options) if options else None
+        if redraw and self.winfo_exists():
+            self._update_requested_width()
+            self._draw()
+        return result
+
+    config = configure
+
+    def cget(self, key):
+        if key == "text":
+            return self._display_text()
+        if key == "state":
+            return self._state
+        return tk.Canvas.cget(self, key)
+
+
+class ModernCheckButton(RoundedButton):
     """Flat check control that avoids the native Windows checkbox appearance."""
 
     def __init__(self, master, *, text: str, variable: tk.BooleanVar, compact: bool = False, **kwargs):
@@ -140,14 +363,12 @@ class ModernCheckButton(tk.Button):
         super().__init__(
             master,
             command=self._toggle,
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
+            variant="toggle",
+            height=30 if compact else 36,
+            radius=8,
             font=(FONT, 9),
             anchor="w",
-            cursor="hand2",
-            padx=8 if compact else 11,
-            pady=4 if compact else 7,
+            padding_x=8 if compact else 11,
             **kwargs,
         )
         self.variable.trace_add("write", self._variable_changed)
@@ -164,10 +385,5 @@ class ModernCheckButton(tk.Button):
         selected = self.variable.get()
         self.configure(
             text=f"{'✓' if selected else ' '}  {self.label}",
-            background=COLORS["primary_soft"] if selected else COLORS["surface"],
-            activebackground=COLORS["primary_soft"],
-            foreground=COLORS["primary"] if selected else COLORS["text"],
-            activeforeground=COLORS["primary"],
-            highlightbackground=COLORS["primary"] if selected else COLORS["border"],
-            highlightcolor=COLORS["primary"],
+            selected=selected,
         )

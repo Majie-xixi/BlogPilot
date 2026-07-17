@@ -25,9 +25,10 @@ def find_chrome() -> Path:
 
 
 class ChromeController:
-    def __init__(self, executable: Path, profile_dir: Path):
+    def __init__(self, executable: Path, profile_dir: Path, default_port: int = 9229):
         self.executable = Path(executable)
         self.profile_dir = Path(profile_dir)
+        self.default_port = default_port
         self.port: int | None = None
         self.process: subprocess.Popen | None = None
 
@@ -54,9 +55,9 @@ class ChromeController:
             url,
         ]
 
-    def start(self, url: str, timeout: float = 15, port: int = 9229) -> int:
+    def start(self, url: str, timeout: float = 15, port: int | None = None) -> int:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self.port = port
+        self.port = self.default_port if port is None else port
         try:
             self.version()
             self.open_tab(url)

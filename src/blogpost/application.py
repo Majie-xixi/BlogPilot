@@ -63,7 +63,11 @@ class ApplicationContext:
             self.publisher.secondary_category = account.secondary_category
             self.publisher.personal_category = account.personal_category
             return self.publisher
-        chrome = ChromeController(find_chrome(), browser_profile_dir(account_id))
+        chrome = ChromeController(
+            find_chrome(),
+            browser_profile_dir(account_id),
+            default_port=9229 + max(0, account.sort_order),
+        )
         return Cto51Publisher(
             chrome,
             app_data_dir() / "diagnostics" / account_id,

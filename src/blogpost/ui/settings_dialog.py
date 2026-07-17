@@ -9,7 +9,7 @@ from blogpost.application import ApplicationContext
 from blogpost.config import AppConfig
 from blogpost.paths import config_path
 from blogpost.ui.theme import COLORS
-from blogpost.ui.widgets import ModernCheckButton, RoundedPanel
+from blogpost.ui.widgets import ModernCheckButton, RoundedButton, RoundedPanel
 
 
 def fit_dialog_geometry(
@@ -174,8 +174,20 @@ class SettingsDialog(Toplevel):
         footer = ttk.Frame(shell, style="Surface.TFrame", padding=(30, 14, 30, 20))
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
-        ttk.Button(footer, text="取消", style="Secondary.TButton", command=self.destroy).grid(row=0, column=1)
-        ttk.Button(footer, text="保存设置", style="Primary.TButton", command=self._save).grid(
+        RoundedButton(
+            footer,
+            text="取消",
+            variant="secondary",
+            command=self.destroy,
+            outer=COLORS["surface"],
+        ).grid(row=0, column=1)
+        RoundedButton(
+            footer,
+            text="保存设置",
+            variant="primary",
+            command=self._save,
+            outer=COLORS["surface"],
+        ).grid(
             row=0, column=2, padx=(10, 0)
         )
 

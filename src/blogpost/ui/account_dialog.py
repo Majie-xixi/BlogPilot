@@ -13,7 +13,7 @@ from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
 from blogpost.publishers.cto51_profile import fetch_profile_snapshot
 from blogpost.ui.theme import COLORS
-from blogpost.ui.widgets import ModernCheckButton, RoundedPanel
+from blogpost.ui.widgets import ModernCheckButton, RoundedButton, RoundedPanel
 
 
 def is_generic_account_name(value: str) -> bool:
@@ -94,7 +94,13 @@ class AccountManagerDialog(tk.Toplevel):
         self.tree.column("status", width=62, minwidth=62, stretch=False, anchor="center")
         self.tree.grid(row=0, column=0, columnspan=2, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", self._select)
-        ttk.Button(sidebar, text="新增账号", style="Primary.TButton", command=self._new).grid(
+        RoundedButton(
+            sidebar,
+            text="新增账号",
+            variant="primary",
+            command=self._new,
+            outer=COLORS["surface"],
+        ).grid(
             row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
 
@@ -133,11 +139,12 @@ class AccountManagerDialog(tk.Toplevel):
                 )
                 self.profile_entry.pack(side="left", fill="x", expand=True)
                 self.profile_entry.bind("<FocusOut>", self._auto_lookup_name)
-                ttk.Button(
+                RoundedButton(
                     control,
                     textvariable=self.name_lookup_var,
-                    style="Secondary.TButton",
+                    variant="secondary",
                     command=lambda: self._start_name_lookup(force=True),
+                    outer=COLORS["surface"],
                 ).pack(side="left", padx=(8, 0))
             else:
                 control = ttk.Entry(form, textvariable=self.vars[name], style="Modern.TEntry")
@@ -167,10 +174,22 @@ class AccountManagerDialog(tk.Toplevel):
         footer = ttk.Frame(shell, style="Surface.TFrame")
         footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Button(footer, text="关闭", style="Secondary.TButton", command=self._close).grid(
+        RoundedButton(
+            footer,
+            text="关闭",
+            variant="secondary",
+            command=self._close,
+            outer=COLORS["surface"],
+        ).grid(
             row=0, column=1
         )
-        ttk.Button(footer, text="保存账号", style="Primary.TButton", command=self._save).grid(
+        RoundedButton(
+            footer,
+            text="保存账号",
+            variant="primary",
+            command=self._save,
+            outer=COLORS["surface"],
+        ).grid(
             row=0, column=2, padx=(10, 0)
         )
 
@@ -386,8 +405,20 @@ class BatchPublishDialog(tk.Toplevel):
             ).pack(side="right")
         actions = ttk.Frame(content, style="Surface.TFrame")
         actions.pack(fill="x", pady=(14, 0))
-        ttk.Button(actions, text="取消", style="Secondary.TButton", command=self.destroy).pack(side="right")
-        ttk.Button(actions, text="开始执行", style="Primary.TButton", command=self._confirm).pack(
+        RoundedButton(
+            actions,
+            text="取消",
+            variant="secondary",
+            command=self.destroy,
+            outer=COLORS["surface"],
+        ).pack(side="right")
+        RoundedButton(
+            actions,
+            text="开始执行",
+            variant="primary",
+            command=self._confirm,
+            outer=COLORS["surface"],
+        ).pack(
             side="right", padx=(0, 10)
         )
         self.update_idletasks()
