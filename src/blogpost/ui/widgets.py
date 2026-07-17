@@ -176,6 +176,7 @@ class RoundedButton(tk.Canvas):
         outer: str | None = None,
         selected: bool = False,
         icon: str | None = None,
+        chevron: bool = False,
         **kwargs,
     ):
         self._text = text
@@ -192,6 +193,7 @@ class RoundedButton(tk.Canvas):
         self._height = height
         self._radius = radius
         self._icon = icon
+        self._chevron = chevron
         self._font_spec = font or (FONT, 9, "bold" if variant == "primary" else "normal")
         background = outer or _master_background(master)
         tk.Canvas.__init__(
@@ -230,7 +232,13 @@ class RoundedButton(tk.Canvas):
     def _update_requested_width(self) -> None:
         measured = tkfont.Font(font=self._font_spec).measure(self._display_text())
         icon_space = 23 if self._icon else 0
-        self.configure(width=max(self._min_width, measured + self._padding_x * 2 + icon_space))
+        chevron_space = 18 if self._chevron else 0
+        self.configure(
+            width=max(
+                self._min_width,
+                measured + self._padding_x * 2 + icon_space + chevron_space,
+            )
+        )
 
     def _palette(self) -> tuple[str, str, str]:
         if self._state == "disabled":
@@ -248,12 +256,10 @@ class RoundedButton(tk.Canvas):
                 COLORS["primary_soft"] if self._hovered else outer,
                 COLORS["primary_hover"] if self._hovered else COLORS["primary"],
             )
-        if self._variant == "account":
-            return (
-                "#FFE9E1" if self._hovered or self._pressed else COLORS["primary_soft"],
-                "#E9AD98",
-                COLORS["text"],
-            )
+        if self._variant == "identity":
+            outer = str(self.cget("background"))
+            fill = COLORS["surface"] if self._hovered or self._pressed else outer
+            return fill, fill, COLORS["text"]
         if self._variant == "toggle" and self._selected:
             return COLORS["primary_soft"], COLORS["primary"], COLORS["primary"]
         return (
@@ -268,6 +274,7 @@ class RoundedButton(tk.Canvas):
         self.delete("button-shape")
         self.delete("button-label")
         self.delete("button-icon")
+        self.delete("button-chevron")
         width = max(2, self.winfo_width())
         height = max(2, self.winfo_height())
         fill, outline, foreground = self._palette()
@@ -299,7 +306,7 @@ class RoundedButton(tk.Canvas):
         )
         if self._icon == "account":
             icon_x = self._padding_x + 7
-            icon_color = COLORS["subtle"] if self._state == "disabled" else COLORS["primary"]
+            icon_color = COLORS["subtle"] if self._state == "disabled" else COLORS["muted"]
             self.create_oval(
                 icon_x - 3,
                 height // 2 - 8,
@@ -324,6 +331,22 @@ class RoundedButton(tk.Canvas):
                 width=2,
                 fill=icon_color,
                 tags="button-icon",
+            )
+        if self._chevron:
+            chevron_x = width - self._padding_x - 4
+            chevron_y = height // 2
+            chevron_color = COLORS["subtle"] if self._state == "disabled" else COLORS["muted"]
+            self.create_line(
+                chevron_x - 4,
+                chevron_y - 2,
+                chevron_x,
+                chevron_y + 2,
+                chevron_x + 4,
+                chevron_y - 2,
+                fill=chevron_color,
+                width=1,
+                smooth=True,
+                tags="button-chevron",
             )
 
     def _enter(self, _event=None) -> None:
@@ -400,7 +423,7 @@ class RoundedProgressBar(tk.Canvas):
         *,
         maximum: float = 100,
         value: float = 0,
-        height: int = 6,
+        height: int = 4,
         track: str = "#E8E5E0",
         fill: str = COLORS["primary"],
         outer: str | None = None,

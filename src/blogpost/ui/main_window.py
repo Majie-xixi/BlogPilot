@@ -140,24 +140,31 @@ class MainWindow:
             account_controls,
             textvariable=self.account_var,
             command=self._toggle_account_popup,
-            variant="account",
-            min_width=190,
-            height=36,
-            radius=8,
+            variant="identity",
+            min_width=160,
+            height=34,
+            radius=7,
             font=(FONT, 10),
             anchor="w",
             padding_x=13,
             outer=COLORS["page"],
             icon="account",
+            chevron=True,
         )
         self.account_selector.grid(row=0, column=0, sticky="ew")
+        tk.Frame(
+            account_controls,
+            width=1,
+            height=22,
+            background=COLORS["border"],
+        ).grid(row=0, column=1, padx=(10, 2))
         RoundedButton(
             account_controls,
             text="账号管理",
             command=self.open_account_manager,
             variant="secondary",
             outer=COLORS["page"],
-        ).grid(row=0, column=1, padx=(8, 0))
+        ).grid(row=0, column=2, padx=(8, 0))
         RoundedButton(
             account_controls,
             text="全局设置",
@@ -165,7 +172,7 @@ class MainWindow:
             variant="secondary",
             outer=COLORS["page"],
         ).grid(
-            row=0, column=2, padx=(8, 0)
+            row=0, column=3, padx=(8, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
@@ -222,7 +229,7 @@ class MainWindow:
             self.progress_frame,
             value=0,
             maximum=100,
-            height=6,
+            height=4,
             outer=COLORS["surface"],
         )
         self.progressbar.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -252,7 +259,7 @@ class MainWindow:
             action_buttons.columnconfigure(column, weight=1, uniform="actions")
         for column, text, command in (
             (0, "打开 51CTO", self.open_profile),
-            (1, "登录当前账号", self.open_login),
+            (1, "自动发布登录", self.open_login),
             (2, "更新每日任务", self.install_schedule),
             (3, "打开最近文章", self.open_latest_article),
             (4, "打开文章目录", self.open_generated_dir),
@@ -275,7 +282,7 @@ class MainWindow:
                 self.latest_article_button = button
             elif text == "重新发布最近文章":
                 self.retry_button = button
-            elif text == "登录当前账号":
+            elif text == "自动发布登录":
                 self.login_button = button
 
         section = ttk.Frame(page, style="Page.TFrame")
@@ -428,7 +435,6 @@ class MainWindow:
 
     def _show_account_name(self, account: Account) -> None:
         self.account_var.set(account.display_name)
-        self.login_button.configure(text=f"登录 · {account.display_name}")
 
     def _select_account(self, account_id: str) -> None:
         if account_id not in self.account_map:
