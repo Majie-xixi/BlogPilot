@@ -8,6 +8,8 @@ COLORS = {
     "page": "#FAFAF8",
     "surface": "#FFFFFF",
     "surface_alt": "#F7F6F3",
+    "control": "#F1EFEA",
+    "control_hover": "#E9E6DF",
     "border": "#E3E1DC",
     "text": "#20201E",
     "muted": "#74736F",
@@ -15,6 +17,7 @@ COLORS = {
     "primary": "#D45F3A",
     "primary_hover": "#BC4D2B",
     "primary_soft": "#FFF0EA",
+    "danger_soft": "#FEF2F2",
     "success": "#15803D",
     "warning": "#A16207",
     "danger": "#B91C1C",
@@ -49,20 +52,14 @@ def configure_theme(root: tk.Tk) -> None:
     style.configure(
         "OutlinedCard.TFrame",
         background=COLORS["surface"],
-        borderwidth=1,
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["border"],
-        darkcolor=COLORS["border"],
-        relief="solid",
+        borderwidth=0,
+        relief="flat",
     )
     style.configure(
         "Hero.TFrame",
         background=COLORS["surface"],
-        borderwidth=1,
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["border"],
-        darkcolor=COLORS["border"],
-        relief="solid",
+        borderwidth=0,
+        relief="flat",
     )
 
     style.configure("TLabel", background=COLORS["page"], foreground=COLORS["text"])
@@ -173,32 +170,26 @@ def configure_theme(root: tk.Tk) -> None:
     )
     style.configure(
         "HeroSecondary.TButton",
-        background=COLORS["surface"],
+        background=COLORS["control"],
         foreground=COLORS["text"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["border"],
-        darkcolor=COLORS["border"],
-        borderwidth=1,
+        borderwidth=0,
         padding=(17, 9),
         font=(FONT, 9),
     )
     style.map(
         "HeroSecondary.TButton",
-        background=[("active", COLORS["surface_alt"]), ("disabled", COLORS["surface_alt"])],
+        background=[("active", COLORS["control_hover"]), ("disabled", COLORS["surface_alt"])],
         foreground=[("disabled", COLORS["subtle"])],
     )
     style.configure(
         "Secondary.TButton",
-        background=COLORS["surface"],
+        background=COLORS["control"],
         foreground=COLORS["text"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["border"],
-        darkcolor=COLORS["border"],
-        borderwidth=1,
+        borderwidth=0,
         padding=(13, 7),
         font=(FONT, 9),
     )
-    style.map("Secondary.TButton", background=[("active", COLORS["surface_alt"])])
+    style.map("Secondary.TButton", background=[("active", COLORS["control_hover"])])
     style.configure(
         "Link.TButton",
         background=COLORS["page"],

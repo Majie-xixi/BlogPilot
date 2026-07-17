@@ -19,6 +19,36 @@ def _master_background(master) -> str:
         return COLORS["page"]
 
 
+def button_palette(
+    *,
+    variant: str,
+    state: str,
+    hovered: bool,
+    pressed: bool,
+    focused: bool,
+    outer: str,
+    selected: bool = False,
+) -> tuple[str, str, str]:
+    """Return a borderless control palette for every visual state."""
+    if state == "disabled":
+        fill = COLORS["surface_alt"]
+        return fill, fill, COLORS["subtle"]
+    if variant == "primary":
+        fill = COLORS["primary_hover"] if hovered or pressed else COLORS["primary"]
+        return fill, fill, "#FFFFFF"
+    if variant == "link":
+        fill = COLORS["primary_soft"] if hovered else outer
+        return fill, fill, COLORS["primary_hover"] if hovered else COLORS["primary"]
+    if variant == "identity":
+        fill = COLORS["control"] if hovered or pressed else outer
+        return fill, fill, COLORS["text"]
+    if variant == "toggle" and selected:
+        fill = COLORS["primary_soft"]
+        return fill, fill, COLORS["primary"]
+    fill = COLORS["control_hover"] if hovered or pressed or focused else COLORS["control"]
+    return fill, fill, COLORS["text"]
+
+
 def _draw_rounded_rectangle(
     canvas: tk.Canvas,
     *,
@@ -98,7 +128,7 @@ class RoundedPanel(tk.Canvas):
         radius: int = 12,
         padding: tuple[int, int] | tuple[int, int, int, int] = (16, 14),
         fill: str = COLORS["surface"],
-        border: str = COLORS["border"],
+        border: str | None = None,
         outer: str = COLORS["page"],
         **kwargs,
     ):
@@ -144,7 +174,7 @@ class RoundedPanel(tk.Canvas):
             y2=height - 1,
             radius=self.radius,
             fill=self.fill,
-            outline=self.border,
+            outline=self.border or self.fill,
         )
         self.tag_lower("panel-shape")
         left, top, right, bottom = self.insets
@@ -241,31 +271,14 @@ class RoundedButton(tk.Canvas):
         )
 
     def _palette(self) -> tuple[str, str, str]:
-        if self._state == "disabled":
-            return COLORS["surface_alt"], COLORS["border"], COLORS["subtle"]
-        if self._variant == "primary":
-            return (
-                COLORS["primary_hover"] if self._hovered or self._pressed else COLORS["primary"],
-                COLORS["primary_hover"] if self._hovered else COLORS["primary"],
-                "#FFFFFF",
-            )
-        if self._variant == "link":
-            outer = str(self.cget("background"))
-            return (
-                COLORS["primary_soft"] if self._hovered else outer,
-                COLORS["primary_soft"] if self._hovered else outer,
-                COLORS["primary_hover"] if self._hovered else COLORS["primary"],
-            )
-        if self._variant == "identity":
-            outer = str(self.cget("background"))
-            fill = COLORS["surface"] if self._hovered or self._pressed else outer
-            return fill, fill, COLORS["text"]
-        if self._variant == "toggle" and self._selected:
-            return COLORS["primary_soft"], COLORS["primary"], COLORS["primary"]
-        return (
-            COLORS["surface_alt"] if self._hovered or self._pressed else COLORS["surface"],
-            COLORS["primary"] if self.focus_get() is self else COLORS["border"],
-            COLORS["text"],
+        return button_palette(
+            variant=self._variant,
+            state=self._state,
+            hovered=self._hovered,
+            pressed=self._pressed,
+            focused=self.focus_get() is self,
+            outer=str(self.cget("background")),
+            selected=self._selected,
         )
 
     def _draw(self, _event=None) -> None:

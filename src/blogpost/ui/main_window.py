@@ -467,8 +467,7 @@ class MainWindow:
         card = tk.Frame(
             popup,
             background=COLORS["surface"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
+            highlightthickness=0,
             padx=5,
             pady=5,
         )
@@ -977,7 +976,10 @@ class MainWindow:
             if messagebox.askyesno("文章需要检查", f"{result.message}\n\n草稿已经保存，是否立即打开？"):
                 os.startfile(result.article_path)
         elif result.status in {RunStatus.FAILED, RunStatus.UNKNOWN}:
-            messagebox.showwarning("任务已停止", result.message or STATUS_TEXT[result.status])
+            self._show_task_failure(
+                result.message or STATUS_TEXT[result.status],
+                uncertain=result.status == RunStatus.UNKNOWN,
+            )
         elif result.status == RunStatus.SKIPPED and result.article_path:
             messagebox.showinfo("安全试运行完成", f"文章已保存：\n{result.article_path}")
 
@@ -1097,6 +1099,64 @@ class MainWindow:
 
         dialog.update_idletasks()
         width, height = 440, 270
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_force()
+
+    def _show_task_failure(self, message: str, *, uncertain: bool = False) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("发布结果待确认" if uncertain else "任务已停止")
+        dialog.configure(background=COLORS["surface"])
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        content = tk.Frame(dialog, background=COLORS["surface"], padx=30, pady=26)
+        content.pack(fill="both", expand=True)
+        tk.Label(
+            content,
+            text="?" if uncertain else "!",
+            foreground=COLORS["warning"] if uncertain else COLORS["danger"],
+            background=COLORS["primary_soft"] if uncertain else COLORS["danger_soft"],
+            font=(FONT, 20, "bold"),
+            width=3,
+            height=1,
+        ).pack(anchor="w")
+        tk.Label(
+            content,
+            text="发布结果需要确认" if uncertain else "任务已安全停止",
+            foreground=COLORS["text"],
+            background=COLORS["surface"],
+            font=(FONT, 17, "bold"),
+        ).pack(anchor="w", pady=(16, 6))
+        tk.Label(
+            content,
+            text=message,
+            foreground=COLORS["muted"],
+            background=COLORS["surface"],
+            font=(FONT, 9),
+            justify="left",
+            wraplength=430,
+        ).pack(anchor="w")
+        tk.Label(
+            content,
+            text="安全保护已生效，软件不会重复提交。",
+            foreground=COLORS["subtle"],
+            background=COLORS["surface"],
+            font=(FONT, 9),
+        ).pack(anchor="w", pady=(8, 0))
+
+        RoundedButton(
+            content,
+            text="知道了",
+            variant="primary",
+            command=dialog.destroy,
+            outer=COLORS["surface"],
+        ).pack(anchor="e", pady=(24, 0))
+
+        dialog.update_idletasks()
+        width, height = 500, 330
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
