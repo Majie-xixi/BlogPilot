@@ -175,6 +175,7 @@ class RoundedButton(tk.Canvas):
         font: tuple | None = None,
         outer: str | None = None,
         selected: bool = False,
+        icon: str | None = None,
         **kwargs,
     ):
         self._text = text
@@ -190,6 +191,7 @@ class RoundedButton(tk.Canvas):
         self._min_width = min_width
         self._height = height
         self._radius = radius
+        self._icon = icon
         self._font_spec = font or (FONT, 9, "bold" if variant == "primary" else "normal")
         background = outer or _master_background(master)
         tk.Canvas.__init__(
@@ -227,7 +229,8 @@ class RoundedButton(tk.Canvas):
 
     def _update_requested_width(self) -> None:
         measured = tkfont.Font(font=self._font_spec).measure(self._display_text())
-        self.configure(width=max(self._min_width, measured + self._padding_x * 2))
+        icon_space = 23 if self._icon else 0
+        self.configure(width=max(self._min_width, measured + self._padding_x * 2 + icon_space))
 
     def _palette(self) -> tuple[str, str, str]:
         if self._state == "disabled":
@@ -245,6 +248,12 @@ class RoundedButton(tk.Canvas):
                 COLORS["primary_soft"] if self._hovered else outer,
                 COLORS["primary_hover"] if self._hovered else COLORS["primary"],
             )
+        if self._variant == "account":
+            return (
+                "#FFE9E1" if self._hovered or self._pressed else COLORS["primary_soft"],
+                "#E9AD98",
+                COLORS["text"],
+            )
         if self._variant == "toggle" and self._selected:
             return COLORS["primary_soft"], COLORS["primary"], COLORS["primary"]
         return (
@@ -258,6 +267,7 @@ class RoundedButton(tk.Canvas):
             return
         self.delete("button-shape")
         self.delete("button-label")
+        self.delete("button-icon")
         width = max(2, self.winfo_width())
         height = max(2, self.winfo_height())
         fill, outline, foreground = self._palette()
@@ -273,7 +283,7 @@ class RoundedButton(tk.Canvas):
             outline=outline,
         )
         if self._anchor == "w":
-            x = self._padding_x
+            x = self._padding_x + (23 if self._icon else 0)
             anchor = "w"
         else:
             x = width // 2
@@ -287,6 +297,34 @@ class RoundedButton(tk.Canvas):
             anchor=anchor,
             tags="button-label",
         )
+        if self._icon == "account":
+            icon_x = self._padding_x + 7
+            icon_color = COLORS["subtle"] if self._state == "disabled" else COLORS["primary"]
+            self.create_oval(
+                icon_x - 3,
+                height // 2 - 8,
+                icon_x + 3,
+                height // 2 - 2,
+                outline=icon_color,
+                width=2,
+                tags="button-icon",
+            )
+            self.create_line(
+                icon_x - 7,
+                height // 2 + 7,
+                icon_x - 5,
+                height // 2 + 2,
+                icon_x,
+                height // 2,
+                icon_x + 5,
+                height // 2 + 2,
+                icon_x + 7,
+                height // 2 + 7,
+                smooth=True,
+                width=2,
+                fill=icon_color,
+                tags="button-icon",
+            )
 
     def _enter(self, _event=None) -> None:
         if self._state != "disabled":
@@ -351,6 +389,101 @@ class RoundedButton(tk.Canvas):
         if key == "state":
             return self._state
         return tk.Canvas.cget(self, key)
+
+
+class RoundedProgressBar(tk.Canvas):
+    """Thin, borderless progress track that matches the rounded UI system."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        maximum: float = 100,
+        value: float = 0,
+        height: int = 6,
+        track: str = "#E8E5E0",
+        fill: str = COLORS["primary"],
+        outer: str | None = None,
+        **kwargs,
+    ):
+        self._maximum = max(1.0, float(maximum))
+        self._value = float(value)
+        self._track = track
+        self._fill = fill
+        self._bar_height = height
+        tk.Canvas.__init__(
+            self,
+            master,
+            height=height,
+            background=outer or _master_background(master),
+            borderwidth=0,
+            highlightthickness=0,
+            **kwargs,
+        )
+        self.bind("<Configure>", self._draw)
+        self.after_idle(self._draw)
+
+    def _draw(self, _event=None) -> None:
+        if not self.winfo_exists():
+            return
+        self.delete("progress")
+        width = max(2, self.winfo_width())
+        height = max(2, self.winfo_height())
+        radius = max(1, height // 2)
+        _draw_rounded_rectangle(
+            self,
+            tag="progress",
+            x1=0,
+            y1=0,
+            x2=width - 1,
+            y2=height - 1,
+            radius=radius,
+            fill=self._track,
+            outline=self._track,
+        )
+        fraction = max(0.0, min(1.0, self._value / self._maximum))
+        if fraction <= 0:
+            return
+        fill_width = max(height, round((width - 1) * fraction))
+        _draw_rounded_rectangle(
+            self,
+            tag="progress",
+            x1=0,
+            y1=0,
+            x2=min(width - 1, fill_width),
+            y2=height - 1,
+            radius=radius,
+            fill=self._fill,
+            outline=self._fill,
+        )
+
+    def configure(self, cnf=None, **kwargs):
+        options = dict(cnf or {})
+        options.update(kwargs)
+        if "maximum" in options:
+            self._maximum = max(1.0, float(options.pop("maximum")))
+        if "value" in options:
+            self._value = float(options.pop("value"))
+        options.pop("mode", None)
+        result = tk.Canvas.configure(self, **options) if options else None
+        if self.winfo_exists():
+            self._draw()
+        return result
+
+    config = configure
+
+    def cget(self, key):
+        if key == "maximum":
+            return self._maximum
+        if key == "value":
+            return self._value
+        return tk.Canvas.cget(self, key)
+
+    def start(self, _interval=None) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
 
 class ModernCheckButton(RoundedButton):

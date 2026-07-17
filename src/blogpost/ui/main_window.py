@@ -21,7 +21,7 @@ from blogpost.ui.account_dialog import (
 )
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
-from blogpost.ui.widgets import RoundedButton, RoundedPanel
+from blogpost.ui.widgets import RoundedButton, RoundedPanel, RoundedProgressBar
 
 
 STATUS_TEXT = {
@@ -140,14 +140,15 @@ class MainWindow:
             account_controls,
             textvariable=self.account_var,
             command=self._toggle_account_popup,
-            variant="secondary",
-            min_width=158,
+            variant="account",
+            min_width=190,
             height=36,
             radius=8,
             font=(FONT, 10),
             anchor="w",
             padding_x=13,
             outer=COLORS["page"],
+            icon="account",
         )
         self.account_selector.grid(row=0, column=0, sticky="ew")
         RoundedButton(
@@ -217,12 +218,12 @@ class MainWindow:
         self.progress_frame = ttk.Frame(hero, style="Surface.TFrame")
         self.progress_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         self.progress_frame.columnconfigure(0, weight=1)
-        self.progressbar = ttk.Progressbar(
+        self.progressbar = RoundedProgressBar(
             self.progress_frame,
-            mode="determinate",
             value=0,
             maximum=100,
-            style="App.Horizontal.TProgressbar",
+            height=6,
+            outer=COLORS["surface"],
         )
         self.progressbar.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.progress_step_var = tk.StringVar(value="")

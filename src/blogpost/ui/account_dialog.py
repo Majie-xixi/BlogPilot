@@ -35,8 +35,8 @@ class AccountManagerDialog(tk.Toplevel):
         self.title("账号管理")
         self.configure(background=COLORS["surface"])
         self.transient(master)
-        self.geometry(self._centered_geometry(900, 640))
-        self.minsize(820, 590)
+        self.geometry(self._centered_geometry(900, 680))
+        self.minsize(820, 630)
         self.vars = {
             "display_name": tk.StringVar(),
             "profile_url": tk.StringVar(),
@@ -107,7 +107,7 @@ class AccountManagerDialog(tk.Toplevel):
         form_panel = RoundedPanel(
             shell,
             radius=12,
-            padding=(22, 18),
+            padding=(22, 15),
             outer=COLORS["surface"],
         )
         form_panel.grid(row=1, column=1, sticky="nsew", pady=(20, 0))
@@ -153,13 +153,13 @@ class AccountManagerDialog(tk.Toplevel):
                 column=column,
                 sticky="ew",
                 padx=(0 if column == 0 else 10, 10 if column == 0 else 0),
-                pady=(6, 11),
+                pady=(4, 7),
             )
         ttk.Label(form, text="主题关键词（作为文章主题硬约束）", style="Field.TLabel").grid(
             row=10, column=0, columnspan=2, sticky="w"
         )
         ttk.Entry(form, textvariable=self.vars["keywords"], style="Modern.TEntry").grid(
-            row=11, column=0, columnspan=2, sticky="ew", pady=(6, 13)
+            row=11, column=0, columnspan=2, sticky="ew", pady=(4, 8)
         )
         ModernCheckButton(
             form,
@@ -170,7 +170,7 @@ class AccountManagerDialog(tk.Toplevel):
             form,
             text="每个账号使用独立 Chrome 登录环境；登录失效只暂停该账号。",
             style="CardDetail.TLabel",
-        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(6, 0))
         footer = ttk.Frame(shell, style="Surface.TFrame")
         footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         footer.columnconfigure(0, weight=1)
