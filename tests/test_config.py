@@ -1,5 +1,6 @@
 from datetime import time
 from pathlib import Path
+import tempfile
 import unittest
 
 from blogpost.config import AppConfig, ConfigError
@@ -41,6 +42,15 @@ class ConfigTests(unittest.TestCase):
         cfg = AppConfig(model="")
         with self.assertRaisesRegex(ConfigError, "model"):
             cfg.validate_for_run()
+
+    def test_missing_config_uses_selected_data_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            data_dir = Path(root)
+
+            cfg = AppConfig.load(data_dir / "config.json")
+
+            self.assertEqual(cfg.history_dir, data_dir / "articles")
+            self.assertEqual(cfg.generated_dir, data_dir / "articles" / "generated_posts")
 
 
 if __name__ == "__main__":

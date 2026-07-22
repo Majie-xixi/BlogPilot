@@ -90,8 +90,16 @@ class AppConfig:
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
         if not path.exists():
-            return cls()
+            return cls.for_data_dir(path.parent)
         return cls.from_json_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    @classmethod
+    def for_data_dir(cls, data_dir: Path) -> "AppConfig":
+        articles = Path(data_dir) / "articles"
+        return cls(
+            history_dir=articles,
+            generated_dir=articles / "generated_posts",
+        )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,15 @@ import sys
 
 DATA_DIR_ENV = "BLOGPILOT_DATA_DIR"
 DATA_DIR_MARKER = "blogpilot-data-dir.txt"
+REGISTRY_KEY = r"Software\BlogPilot"
+REGISTRY_VALUE = "DataDirectory"
+DATA_SUBDIRECTORIES = (
+    "articles",
+    "logs",
+    "diagnostics",
+    "chrome-profiles",
+    "backups",
+)
 
 
 def _data_dir_marker() -> Path:
@@ -22,7 +31,33 @@ def legacy_app_data_dir() -> Path:
     return Path.home() / ".blogpost-publisher"
 
 
-def app_data_dir() -> Path:
+def _registry_data_dir() -> Path | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY) as key:
+            value, _kind = winreg.QueryValueEx(key, REGISTRY_VALUE)
+    except OSError:
+        return None
+    value = str(value).strip()
+    return Path(value).expanduser().resolve() if value else None
+
+
+def _write_registry_data_dir(path: Path) -> None:
+    if sys.platform == "win32":
+        import winreg
+
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, REGISTRY_KEY) as key:
+            winreg.SetValueEx(key, REGISTRY_VALUE, 0, winreg.REG_SZ, str(path))
+        return
+    marker = _data_dir_marker()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(str(path), encoding="utf-8")
+
+
+def configured_data_dir() -> Path | None:
     configured = os.environ.get(DATA_DIR_ENV, "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
@@ -34,7 +69,25 @@ def app_data_dir() -> Path:
             if not path.is_absolute():
                 path = marker.parent / path
             return path.resolve()
-    return legacy_app_data_dir()
+    return _registry_data_dir()
+
+
+def initialize_data_dir(path: Path) -> Path:
+    resolved = Path(path).expanduser().resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    for name in DATA_SUBDIRECTORIES:
+        (resolved / name).mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
+def save_data_dir(path: Path) -> Path:
+    resolved = initialize_data_dir(path)
+    _write_registry_data_dir(resolved)
+    return resolved
+
+
+def app_data_dir() -> Path:
+    return configured_data_dir() or legacy_app_data_dir()
 
 
 def config_path() -> Path:

@@ -10,7 +10,7 @@
 
 ## 页面结构未识别
 
-诊断文件位于 `E:\Projects\BlogPilotWorkspace\app_data\diagnostics\<account_id>`。文件已做基础脱敏，不要直接公开发送未检查的诊断文件。
+诊断文件位于用户所选数据目录的 `diagnostics\<account_id>`。文件已做基础脱敏，不要直接公开发送未检查的诊断文件。
 
 ## API 鉴权失败
 
