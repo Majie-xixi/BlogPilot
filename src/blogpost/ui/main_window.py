@@ -9,6 +9,7 @@ import re
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
+import time
 import webbrowser
 
 from blogpost.application import ApplicationContext
@@ -106,6 +107,7 @@ class MainWindow:
         self.account_map: dict[str, Account] = {}
         self.current_account_id = DEFAULT_ACCOUNT_ID
         self.account_popup: tk.Toplevel | None = None
+        self.login_sync_generation = 0
         self.batch_progress_positions: dict[str, int] = {}
         self.batch_progress_total = 1
         self._build()
@@ -958,6 +960,8 @@ class MainWindow:
                     self._finish_batch(event[1])
                 elif event[0] == "runtime_status":
                     self._apply_runtime_status(*event[1:])
+                elif event[0] == "login_profile":
+                    self._apply_login_profile(*event[1:])
         except Empty:
             pass
         self.root.after(150, self._drain_queue)
@@ -1171,10 +1175,90 @@ class MainWindow:
     def open_login(self) -> None:
         try:
             self.context.publisher_for_account(self.current_account_id).open_login()
+            self._start_login_profile_sync()
             self.progress_var.set(f"已打开 {self.current_account.display_name} 的独立登录窗口")
             self._append_log(f"已打开 {self.current_account.display_name} 的 51CTO 登录窗口。")
         except Exception as exc:
             messagebox.showerror("无法打开自动发布登录窗口", str(exc))
+
+    def _start_login_profile_sync(self) -> None:
+        self.login_sync_generation += 1
+        generation = self.login_sync_generation
+        account_id = self.current_account_id
+        publisher = self.context.publisher_for_account(account_id)
+        self._append_log("正在等待 51CTO 登录完成并同步账号信息。")
+
+        def worker() -> None:
+            deadline = time.monotonic() + 120
+            last_error = None
+            while time.monotonic() < deadline:
+                try:
+                    snapshot = publisher.current_profile_snapshot()
+                    self.queue.put(("login_profile", generation, account_id, snapshot, None))
+                    return
+                except Exception as exc:
+                    last_error = str(exc)
+                    time.sleep(3)
+            self.queue.put(("login_profile", generation, account_id, None, last_error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_login_profile(
+        self,
+        generation: int,
+        account_id: str,
+        snapshot: ProfileSnapshot | None,
+        error: str | None,
+    ) -> None:
+        if generation != self.login_sync_generation or account_id != self.current_account_id:
+            return
+        if snapshot is None:
+            self._append_log(
+                f"未能自动同步 51CTO 账号信息：{error or '登录后未识别到博客主页'}",
+                "warning",
+            )
+            return
+
+        account = self.context.account(account_id)
+        detected_url = snapshot.profile_url.rstrip("/")
+        configured_url = account.profile_url.rstrip("/")
+        if configured_url and configured_url != detected_url:
+            self._append_log(
+                f"已登录账号与当前配置不一致，未覆盖。当前配置：{configured_url}；登录账号：{detected_url}",
+                "warning",
+            )
+            self.progress_var.set("检测到登录账号与当前配置不一致，已停止自动覆盖")
+            return
+
+        display_name = account.display_name
+        if snapshot.display_name and is_generic_account_name(display_name):
+            display_name = snapshot.display_name
+        updated = replace(account, profile_url=detected_url, display_name=display_name)
+        try:
+            saved = self.context.repository.save_account(updated)
+        except ValueError:
+            if display_name == account.display_name:
+                self._append_log("账号信息同步失败：账号显示名称重复。", "error")
+                return
+            saved = self.context.repository.save_account(
+                replace(account, profile_url=detected_url)
+            )
+            self._append_log(
+                f"已同步 51CTO 主页：{detected_url}；昵称“{display_name}”已存在，暂未覆盖。",
+                "warning",
+            )
+        except Exception as exc:
+            self._append_log(f"账号信息同步失败：{exc}", "error")
+            return
+        else:
+            name_note = f" · {saved.display_name}" if saved.display_name else ""
+            self._append_log(f"已同步 51CTO 账号信息：{detected_url}{name_note}", "success")
+
+        self.account_map[account_id] = saved
+        self._show_account_name(saved)
+        self.profile_snapshot = snapshot
+        self.progress_var.set(f"已同步 51CTO 账号：{saved.display_name}")
+        self.refresh()
 
     def install_schedule(self) -> None:
         try:

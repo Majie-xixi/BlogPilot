@@ -7,7 +7,26 @@ from blogpost.application import ApplicationContext
 from blogpost.browser.chrome import ChromeController, find_chrome
 from blogpost.browser.websocket import encode_text_frame
 from blogpost.domain import Account
-from blogpost.publishers.cto51 import build_fill_script, build_settings_script
+from blogpost.publishers.cto51 import (
+    Cto51Publisher,
+    HOME_URL,
+    build_fill_script,
+    build_settings_script,
+)
+
+
+class FakeProfileSession:
+    def __init__(self, _websocket_url):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def evaluate(self, _expression):
+        return "https://blog.51cto.com/u_123456"
 
 
 class ChromeTests(unittest.TestCase):
@@ -74,6 +93,62 @@ class ChromeTests(unittest.TestCase):
 
         self.assertEqual(publisher.chrome.default_port, 9230)
         self.assertEqual(publisher.chrome.profile_dir, Path(r"E:\profiles\account-two"))
+
+    def test_current_profile_url_reuses_existing_51cto_page(self):
+        class ChromeStub:
+            port = 9229
+
+            def __init__(self):
+                self.opened = []
+
+            def list_targets(self):
+                return [
+                    {
+                        "type": "page",
+                        "url": "https://blog.51cto.com/login",
+                        "webSocketDebuggerUrl": "ws://profile",
+                    }
+                ]
+
+            def open_tab(self, url):
+                self.opened.append(url)
+                raise AssertionError("should reuse existing page")
+
+        chrome = ChromeStub()
+        publisher = Cto51Publisher(chrome, Path("diagnostics"))
+
+        with patch("blogpost.publishers.cto51.CdpSession", FakeProfileSession):
+            url = publisher.current_profile_url()
+
+        self.assertEqual(url, "https://blog.51cto.com/u_123456")
+        self.assertEqual(chrome.opened, [])
+
+    def test_current_profile_url_opens_home_once_when_needed(self):
+        class ChromeStub:
+            port = 9229
+
+            def __init__(self):
+                self.opened = []
+
+            def list_targets(self):
+                return []
+
+            def open_tab(self, url):
+                self.opened.append(url)
+                return {"type": "page", "url": url, "webSocketDebuggerUrl": "ws://home"}
+
+        chrome = ChromeStub()
+        publisher = Cto51Publisher(chrome, Path("diagnostics"))
+
+        with patch("blogpost.publishers.cto51.CdpSession", FakeProfileSession), patch.object(
+            Cto51Publisher,
+            "_wait_page_content",
+            return_value=None,
+        ):
+            url = publisher.current_profile_url()
+
+        self.assertEqual(url, "https://blog.51cto.com/u_123456")
+        self.assertEqual(chrome.opened, [HOME_URL])
 
     def test_websocket_client_frames_are_masked(self):
         frame = encode_text_frame("hello", mask_key=b"1234")

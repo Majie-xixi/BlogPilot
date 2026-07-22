@@ -17,6 +17,25 @@ PUBLISH_URL = "https://blog.51cto.com/blogger/publish"
 HOME_URL = "https://blog.51cto.com/"
 
 
+CURRENT_PROFILE_SCRIPT = """(() => {
+const normalize=(value)=>{
+  try {
+    const url=new URL(value, location.href);
+    const href=url.href.replace(/\\/$/,'');
+    return /^https:\\/\\/blog\\.51cto\\.com\\/u_\\d+$/.test(href)?href:'';
+  } catch {
+    return '';
+  }
+};
+const anchors=[...document.querySelectorAll('a[href]')];
+const byText=anchors.find(a=>normalize(a.href)&&/我的博客|个人主页|主页/.test(a.textContent.trim()));
+if(byText)return normalize(byText.href);
+const current=normalize(location.href);
+if(current)return current;
+return anchors.map(a=>normalize(a.href)).find(Boolean)||'';
+})()"""
+
+
 def build_fill_script(title: str, markdown: str, category: str = "") -> str:
     """Build a Vue/React-safe editor fill script.
 
@@ -110,6 +129,27 @@ class Cto51Publisher:
 
     def open_login(self) -> None:
         self.chrome.start("https://blog.51cto.com/login")
+
+    def current_profile_url(self) -> str:
+        return self._current_profile_url()
+
+    def current_profile_snapshot(self) -> ProfileSnapshot:
+        profile_url = self.current_profile_url()
+        if not profile_url:
+            raise ValueError("未识别到当前登录的 51CTO 博客主页")
+        return fetch_profile_snapshot(profile_url)
+
+    @staticmethod
+    def _profile_url_from_target(target: dict) -> str:
+        websocket_url = target.get("webSocketDebuggerUrl")
+        if not websocket_url:
+            return ""
+        try:
+            with CdpSession(websocket_url) as session:
+                value = session.evaluate(CURRENT_PROFILE_SCRIPT)
+        except Exception:
+            return ""
+        return value if isinstance(value, str) else ""
 
     def has_publication_on(self, day: date) -> bool | None:
         """Check the public profile without starting the automation browser."""
@@ -224,12 +264,32 @@ class Cto51Publisher:
             self.chrome.start(HOME_URL)
             target = self.chrome.wait_for_target(HOME_URL)
         else:
-            target = self.chrome.open_tab(HOME_URL)
+            targets = [
+                target
+                for target in self.chrome.list_targets()
+                if target.get("type") == "page"
+                and "blog.51cto.com" in str(target.get("url", ""))
+            ]
+            for target in targets:
+                value = self._profile_url_from_target(target)
+                if value:
+                    return value
+            target = next(
+                (
+                    target
+                    for target in targets
+                    if str(target.get("url", "")).startswith(HOME_URL)
+                ),
+                None,
+            ) or self.chrome.open_tab(HOME_URL)
         websocket_url = target.get("webSocketDebuggerUrl")
         if not websocket_url:
             return ""
         with CdpSession(websocket_url) as session:
             self._wait_page_content(session, HOME_URL)
+            value = session.evaluate(CURRENT_PROFILE_SCRIPT)
+            if isinstance(value, str) and value:
+                return value
             value = session.evaluate(
                 "[...document.querySelectorAll('a[href]')].find(a=>a.textContent.trim()==='我的博客'&&/\\/u_\\d+\\/?$/.test(a.href))?.href||''"
             )
