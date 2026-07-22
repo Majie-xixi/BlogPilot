@@ -20,6 +20,7 @@ from blogpost.ui.account_dialog import (
     BatchPublishDialog,
     is_generic_account_name,
 )
+from blogpost.ui.help_dialog import HelpDialog
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
 from blogpost.ui.widgets import RoundedButton, RoundedPanel, RoundedProgressBar
@@ -162,11 +163,18 @@ class MainWindow:
         ).grid(row=0, column=1, padx=(10, 2))
         RoundedButton(
             account_controls,
+            text="使用说明",
+            command=self.open_help,
+            variant="secondary",
+            outer=COLORS["page"],
+        ).grid(row=0, column=2, padx=(8, 0))
+        RoundedButton(
+            account_controls,
             text="账号管理",
             command=self.open_account_manager,
             variant="secondary",
             outer=COLORS["page"],
-        ).grid(row=0, column=2, padx=(8, 0))
+        ).grid(row=0, column=3, padx=(8, 0))
         RoundedButton(
             account_controls,
             text="全局设置",
@@ -174,7 +182,7 @@ class MainWindow:
             variant="secondary",
             outer=COLORS["page"],
         ).grid(
-            row=0, column=3, padx=(8, 0)
+            row=0, column=4, padx=(8, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
@@ -503,6 +511,9 @@ class MainWindow:
 
     def open_account_manager(self) -> None:
         AccountManagerDialog(self.root, self.context, self._account_saved)
+
+    def open_help(self) -> None:
+        HelpDialog(self.root)
 
     def _account_saved(self, account_id: str) -> None:
         self._reload_accounts(account_id)
