@@ -13,7 +13,7 @@ DATA_SUBDIRECTORIES = (
     "articles",
     "logs",
     "diagnostics",
-    "chrome-profiles",
+    "browser-profiles",
     "backups",
 )
 
@@ -102,9 +102,31 @@ def log_path() -> Path:
     return app_data_dir() / "logs" / "application.log"
 
 
-def browser_profile_dir(account_id: str = "default") -> Path:
-    safe_id = "".join(char for char in account_id if char.isalnum() or char in "-_") or "default"
-    if safe_id == "default":
-        # Preserve the existing signed-in session during the multi-account migration.
-        return app_data_dir() / "chrome-profile"
-    return app_data_dir() / "chrome-profiles" / safe_id
+def _safe_path_component(value: str, fallback: str, *, lowercase: bool = False) -> str:
+    safe_value = "".join(char for char in value if char.isalnum() or char in "-_")
+    safe_value = safe_value or fallback
+    return safe_value.lower() if lowercase else safe_value
+
+
+def browser_profile_dir(
+    account_id: str = "default",
+    browser_name: str = "Chrome",
+) -> Path:
+    safe_id = _safe_path_component(account_id, "default")
+    safe_browser = _safe_path_component(browser_name, "browser", lowercase=True)
+    root = app_data_dir()
+    target = root / "browser-profiles" / safe_browser / safe_id
+    legacy = (
+        root / "chrome-profile"
+        if safe_id == "default"
+        else root / "chrome-profiles" / safe_id
+    )
+    if legacy.is_dir() and not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            legacy.replace(target)
+        except OSError:
+            # A running legacy browser can temporarily lock its profile on Windows.
+            # Reuse it now and retry the rename on the next application start.
+            return legacy
+    return target

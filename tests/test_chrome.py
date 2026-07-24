@@ -1,4 +1,5 @@
 from pathlib import Path
+import socket
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -35,13 +36,6 @@ class FakeProfileSession:
 
 
 class ChromeTests(unittest.TestCase):
-    def test_installed_supported_browser_is_found(self):
-        browser = find_supported_browser()
-        path = browser.executable
-        self.assertTrue(path.exists())
-        self.assertIn(browser.name, {"Chrome", "Edge"})
-        self.assertIn(path.name.lower(), {"chrome.exe", "msedge.exe"})
-
     def test_chrome_is_preferred_when_both_browsers_exist(self):
         chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 
@@ -62,6 +56,11 @@ class ChromeTests(unittest.TestCase):
 
         self.assertEqual(browser.name, "Edge")
         self.assertEqual(browser.executable, edge_path)
+
+    def test_missing_supported_browser_has_clear_error(self):
+        with patch("blogpost.browser.chrome.Path.exists", return_value=False):
+            with self.assertRaisesRegex(FileNotFoundError, "Chrome.*Edge"):
+                find_supported_browser()
 
     def test_find_chrome_keeps_legacy_path_alias(self):
         edge_path = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
@@ -103,6 +102,37 @@ class ChromeTests(unittest.TestCase):
 
             self.assertIn("--remote-debugging-port=9230", args)
 
+    def test_available_port_skips_a_listener_on_the_preferred_port(self):
+        with tempfile.TemporaryDirectory() as root, socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            occupied = listener.getsockname()[1]
+            controller = ChromeController(
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(root) / "profile",
+                default_port=occupied,
+            )
+
+            selected = controller.find_available_port(occupied, attempts=2)
+
+        self.assertEqual(selected, occupied + 1)
+
+    def test_start_does_not_attach_to_an_unknown_existing_debug_port(self):
+        with tempfile.TemporaryDirectory() as root:
+            controller = ChromeController(
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(root) / "profile",
+                default_port=9229,
+            )
+            with (
+                patch.object(controller, "find_available_port", return_value=9230),
+                patch("blogpost.browser.chrome.subprocess.Popen") as popen,
+                patch.object(controller, "version", return_value={"Browser": "Chrome"}),
+            ):
+                selected = controller.start("https://blog.51cto.com")
+
+        self.assertEqual(selected, 9230)
+        self.assertIn("--remote-debugging-port=9230", popen.call_args.args[0])
+
     def test_second_account_publisher_uses_a_different_port(self):
         account = Account(
             id="account-two",
@@ -132,9 +162,10 @@ class ChromeTests(unittest.TestCase):
         ), patch(
             "blogpost.application.browser_profile_dir",
             return_value=Path(r"E:\profiles\account-two"),
-        ):
+        ) as profile_dir:
             publisher = context.publisher_for_account(account.id)
 
+        profile_dir.assert_called_once_with(account.id, "Chrome")
         self.assertEqual(publisher.chrome.default_port, 9230)
         self.assertEqual(publisher.chrome.profile_dir, Path(r"E:\profiles\account-two"))
 

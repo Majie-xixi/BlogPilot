@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import time
 from urllib.error import URLError
@@ -96,15 +97,28 @@ class ChromeController:
             url,
         ]
 
+    def find_available_port(self, preferred_port: int, attempts: int = 20) -> int:
+        upper_bound = min(preferred_port + attempts, 65536)
+        for candidate in range(preferred_port, upper_bound):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                try:
+                    probe.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+            return candidate
+        raise OSError(f"没有可用的 {self.browser_name} 调试端口")
+
     def start(self, url: str, timeout: float = 15, port: int | None = None) -> int:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self.port = self.default_port if port is None else port
-        try:
-            self.version()
-            self.open_tab(url)
-            return self.port
-        except (URLError, ConnectionError, OSError):
-            pass
+        if self.process is not None and self.process.poll() is None and self.port is not None:
+            try:
+                self.version()
+                self.open_tab(url)
+                return self.port
+            except (URLError, ConnectionError, OSError):
+                pass
+        preferred_port = self.default_port if port is None else port
+        self.port = self.find_available_port(preferred_port)
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.process = subprocess.Popen(
             self.build_launch_args(self.port, url),

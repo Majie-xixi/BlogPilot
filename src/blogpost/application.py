@@ -66,7 +66,7 @@ class ApplicationContext:
         browser = find_supported_browser()
         chrome = ChromeController(
             browser.executable,
-            browser_profile_dir(account_id),
+            browser_profile_dir(account_id, browser.name),
             default_port=9229 + max(0, account.sort_order),
             browser_name=browser.name,
         )
@@ -227,7 +227,11 @@ def build_context() -> ApplicationContext:
     )
     secrets = DpapiSecretStore(app_data_dir() / "api-key.bin")
     browser = find_supported_browser()
-    chrome = ChromeController(browser.executable, browser_profile_dir(), browser_name=browser.name)
+    chrome = ChromeController(
+        browser.executable,
+        browser_profile_dir(browser_name=browser.name),
+        browser_name=browser.name,
+    )
     publisher = Cto51Publisher(
         chrome,
         app_data_dir() / "diagnostics" / DEFAULT_ACCOUNT_ID,
