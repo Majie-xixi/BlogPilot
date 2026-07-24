@@ -168,7 +168,7 @@ class AccountManagerDialog(tk.Toplevel):
         ).grid(row=12, column=0, sticky="w", pady=(2, 0))
         ttk.Label(
             form,
-            text="每个账号使用独立 Chrome 登录环境；登录失效只暂停该账号。",
+            text="每个账号使用独立自动化浏览器登录环境；登录失效只暂停该账号。",
             style="CardDetail.TLabel",
         ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(6, 0))
         footer = ttk.Frame(shell, style="Surface.TFrame")

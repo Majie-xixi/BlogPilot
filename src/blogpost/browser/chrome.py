@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -13,22 +14,62 @@ from urllib.request import Request, urlopen
 _CHROME_PATHS = (
     Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
     Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
-    Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    Path(os.environ.get("LOCALAPPDATA", ""))
+    / "Google"
+    / "Chrome"
+    / "Application"
+    / "chrome.exe",
+)
+
+_EDGE_PATHS = (
+    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+    Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+    Path(os.environ.get("LOCALAPPDATA", ""))
+    / "Microsoft"
+    / "Edge"
+    / "Application"
+    / "msedge.exe",
 )
 
 
-def find_chrome() -> Path:
+@dataclass(frozen=True, slots=True)
+class BrowserInstallation:
+    name: str
+    executable: Path
+
+
+def find_google_chrome() -> Path:
     for path in _CHROME_PATHS:
         if path.exists():
             return path
     raise FileNotFoundError("未找到 Google Chrome")
 
 
+def find_supported_browser() -> BrowserInstallation:
+    for name, paths in (("Chrome", _CHROME_PATHS), ("Edge", _EDGE_PATHS)):
+        for path in paths:
+            if path.exists():
+                return BrowserInstallation(name, path)
+    raise FileNotFoundError("未找到 Google Chrome 或 Microsoft Edge")
+
+
+def find_chrome() -> Path:
+    """Backward-compatible alias for older call sites."""
+    return find_supported_browser().executable
+
+
 class ChromeController:
-    def __init__(self, executable: Path, profile_dir: Path, default_port: int = 9229):
+    def __init__(
+        self,
+        executable: Path,
+        profile_dir: Path,
+        default_port: int = 9229,
+        browser_name: str = "Chrome",
+    ):
         self.executable = Path(executable)
         self.profile_dir = Path(profile_dir)
         self.default_port = default_port
+        self.browser_name = browser_name
         self.port: int | None = None
         self.process: subprocess.Popen | None = None
 
@@ -38,8 +79,8 @@ class ChromeController:
             f"--remote-debugging-port={port}",
             "--remote-allow-origins=*",
             f"--user-data-dir={self.profile_dir}",
-            # This profile exists only for 51CTO automation.  Do not let it
-            # trigger Chrome component/model downloads or unrelated services.
+            # This profile exists only for 51CTO automation. Do not let it
+            # trigger component/model downloads or unrelated background services.
             "--disable-component-update",
             "--disable-background-networking",
             "--disable-sync",
@@ -78,7 +119,7 @@ class ChromeController:
                 return self.port
             except (URLError, ConnectionError, OSError):
                 time.sleep(0.2)
-        raise TimeoutError("Chrome 调试端口启动超时")
+        raise TimeoutError(f"{self.browser_name} 调试端口启动超时")
 
     def version(self) -> dict:
         return self._json_request("/json/version")
@@ -90,18 +131,19 @@ class ChromeController:
         return self._json_request(f"/json/new?{quote(url, safe=':/?=&')}", method="PUT")
 
     def wait_for_target(self, url_prefix: str, timeout: float = 15) -> dict:
-        """Wait for Chrome to expose a page target for a newly opened URL."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             for target in self.list_targets():
-                if target.get("type") == "page" and str(target.get("url", "")).startswith(url_prefix):
+                if target.get("type") == "page" and str(target.get("url", "")).startswith(
+                    url_prefix
+                ):
                     return target
             time.sleep(0.2)
-        raise TimeoutError(f"Chrome 页面打开超时：{url_prefix}")
+        raise TimeoutError(f"{self.browser_name} 页面打开超时：{url_prefix}")
 
     def _json_request(self, path: str, method: str = "GET") -> dict:
         if self.port is None:
-            raise RuntimeError("Chrome is not started")
+            raise RuntimeError(f"{self.browser_name} is not started")
         request = Request(f"http://127.0.0.1:{self.port}{path}", method=method)
         with urlopen(request, timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))

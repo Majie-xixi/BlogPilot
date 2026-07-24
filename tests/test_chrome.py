@@ -4,7 +4,12 @@ import unittest
 from unittest.mock import patch
 
 from blogpost.application import ApplicationContext
-from blogpost.browser.chrome import ChromeController, find_chrome
+from blogpost.browser.chrome import (
+    BrowserInstallation,
+    ChromeController,
+    find_chrome,
+    find_supported_browser,
+)
 from blogpost.browser.websocket import encode_text_frame
 from blogpost.domain import Account
 from blogpost.publishers.cto51 import (
@@ -30,22 +35,58 @@ class FakeProfileSession:
 
 
 class ChromeTests(unittest.TestCase):
-    def test_installed_chrome_is_found(self):
-        path = find_chrome()
+    def test_installed_supported_browser_is_found(self):
+        browser = find_supported_browser()
+        path = browser.executable
         self.assertTrue(path.exists())
-        self.assertEqual(path.name.lower(), "chrome.exe")
+        self.assertIn(browser.name, {"Chrome", "Edge"})
+        self.assertIn(path.name.lower(), {"chrome.exe", "msedge.exe"})
+
+    def test_chrome_is_preferred_when_both_browsers_exist(self):
+        chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+
+        with patch("blogpost.browser.chrome.Path.exists", return_value=True):
+            browser = find_supported_browser()
+
+        self.assertEqual(browser.name, "Chrome")
+        self.assertEqual(browser.executable, chrome_path)
+
+    def test_edge_is_used_when_chrome_is_missing(self):
+        edge_path = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+
+        def exists(path):
+            return str(path).lower() == str(edge_path).lower()
+
+        with patch("blogpost.browser.chrome.Path.exists", exists):
+            browser = find_supported_browser()
+
+        self.assertEqual(browser.name, "Edge")
+        self.assertEqual(browser.executable, edge_path)
+
+    def test_find_chrome_keeps_legacy_path_alias(self):
+        edge_path = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+
+        def exists(path):
+            return str(path).lower() == str(edge_path).lower()
+
+        with patch("blogpost.browser.chrome.Path.exists", exists):
+            self.assertEqual(find_chrome(), edge_path)
 
     def test_launch_arguments_use_dedicated_profile(self):
         with tempfile.TemporaryDirectory() as root:
             controller = ChromeController(
                 Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
                 Path(root) / "profile",
+                browser_name="Edge",
             )
             args = controller.build_launch_args(9229, "https://blog.51cto.com")
             joined = " ".join(args)
             self.assertIn("--remote-debugging-port=9229", joined)
             self.assertIn(str(Path(root) / "profile"), joined)
             self.assertNotIn("User Data\\Default", joined)
+            self.assertIn("--disable-component-update", args)
+            self.assertIn("--disable-background-networking", args)
+            self.assertIn("--disable-sync", args)
 
     def test_controller_uses_account_specific_default_port(self):
         with tempfile.TemporaryDirectory() as root:
@@ -83,8 +124,11 @@ class ChromeTests(unittest.TestCase):
             scheduler=None,
         )
         with patch(
-            "blogpost.application.find_chrome",
-            return_value=Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            "blogpost.application.find_supported_browser",
+            return_value=BrowserInstallation(
+                "Chrome",
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            ),
         ), patch(
             "blogpost.application.browser_profile_dir",
             return_value=Path(r"E:\profiles\account-two"),

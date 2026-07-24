@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable, Iterable
 
 from blogpost.article_store import ArticleStore
-from blogpost.browser.chrome import ChromeController, find_chrome
+from blogpost.browser.chrome import ChromeController, find_supported_browser
 from blogpost.config import AppConfig
 from blogpost.corpus import CorpusIndexer
 from blogpost.db import Database
@@ -63,10 +63,12 @@ class ApplicationContext:
             self.publisher.secondary_category = account.secondary_category
             self.publisher.personal_category = account.personal_category
             return self.publisher
+        browser = find_supported_browser()
         chrome = ChromeController(
-            find_chrome(),
+            browser.executable,
             browser_profile_dir(account_id),
             default_port=9229 + max(0, account.sort_order),
+            browser_name=browser.name,
         )
         return Cto51Publisher(
             chrome,
@@ -224,7 +226,8 @@ def build_context() -> ApplicationContext:
         schedule_time=config.schedule_time,
     )
     secrets = DpapiSecretStore(app_data_dir() / "api-key.bin")
-    chrome = ChromeController(find_chrome(), browser_profile_dir())
+    browser = find_supported_browser()
+    chrome = ChromeController(browser.executable, browser_profile_dir(), browser_name=browser.name)
     publisher = Cto51Publisher(
         chrome,
         app_data_dir() / "diagnostics" / DEFAULT_ACCOUNT_ID,

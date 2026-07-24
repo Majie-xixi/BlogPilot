@@ -1,1 +1,1 @@
-"""Standard-library Chrome DevTools Protocol support."""
+"""Standard-library Chromium DevTools Protocol support."""
