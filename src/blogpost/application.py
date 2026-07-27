@@ -215,6 +215,19 @@ class ApplicationContext:
             raise
 
 
+def scheduler_for_runtime() -> WindowsTaskScheduler:
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable)
+        return WindowsTaskScheduler(executable, executable.parent, "run-daily")
+
+    project_root = Path(__file__).resolve().parents[2]
+    return WindowsTaskScheduler(
+        Path(sys.executable),
+        project_root,
+        f'"{project_root / "main.py"}" run-daily',
+    )
+
+
 def build_context() -> ApplicationContext:
     config = AppConfig.load(config_path())
     database = Database(database_path())
@@ -239,13 +252,5 @@ def build_context() -> ApplicationContext:
         default_account.secondary_category,
         default_account.personal_category,
     )
-    if getattr(sys, "frozen", False):
-        executable = Path(sys.executable)
-        arguments = "run-daily"
-        working_dir = executable.parent
-    else:
-        executable = Path(sys.executable)
-        arguments = "-m blogpost run-daily"
-        working_dir = Path.cwd()
-    scheduler = WindowsTaskScheduler(executable, working_dir, arguments)
+    scheduler = scheduler_for_runtime()
     return ApplicationContext(config, repository, secrets, chrome, publisher, scheduler)

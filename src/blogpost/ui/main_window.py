@@ -61,6 +61,28 @@ TRIGGER_TEXT = {
 }
 
 
+def format_schedule_status(status: str, time_text: str) -> tuple[str, str]:
+    status = status.strip()
+    if not status or status == "Missing":
+        return "尚未安装", f"配置时间 {time_text} · 点击下方按钮安装"
+    if status == "Invalid|ExecutableMissing":
+        return "任务需要更新", "启动文件不存在 · 点击“更新每日任务”修复"
+    if status == "Invalid|ActionMismatch":
+        return "任务需要更新", "启动命令已经过期 · 点击“更新每日任务”修复"
+    if status.startswith("Failed|"):
+        result = status.partition("|")[2]
+        return "上次运行失败", f"错误码 {result} · 点击“更新每日任务”修复"
+    if status.startswith("检查失败"):
+        return f"配置时间 {time_text}", status
+    state_text = {
+        "Ready": "就绪",
+        "Running": "正在运行",
+        "Disabled": "已禁用",
+        "Queued": "等待运行",
+    }.get(status, status)
+    return f"每天 {time_text}", f"Windows 计划任务已安装 · {state_text}"
+
+
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
     match = re.match(
@@ -693,23 +715,10 @@ class MainWindow:
                     profile_error = f"历史同步失败：{exc}"
         self._render_publication_status(profile_error)
 
-        status = schedule_status.strip()
         time_text = self.current_account.schedule_time.strftime("%H:%M")
-        if not status or "未安装" in status:
-            self.schedule_value_var.set("尚未安装")
-            self.schedule_detail_var.set(f"配置时间 {time_text} · 点击下方按钮安装")
-        elif status.startswith("检查失败"):
-            self.schedule_value_var.set(f"配置时间 {time_text}")
-            self.schedule_detail_var.set(status)
-        else:
-            state_text = {
-                "Ready": "就绪",
-                "Running": "正在运行",
-                "Disabled": "已禁用",
-                "Queued": "等待运行",
-            }.get(status, status)
-            self.schedule_value_var.set(f"每天 {time_text}")
-            self.schedule_detail_var.set(f"Windows 计划任务已安装 · {state_text}")
+        value_text, detail_text = format_schedule_status(schedule_status, time_text)
+        self.schedule_value_var.set(value_text)
+        self.schedule_detail_var.set(detail_text)
 
     def _append_log(
         self,
