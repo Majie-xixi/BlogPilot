@@ -12,10 +12,11 @@ from blogpost.browser.chrome import (
     find_supported_browser,
 )
 from blogpost.browser.websocket import encode_text_frame
-from blogpost.domain import Account
+from blogpost.domain import Account, RunStatus
 from blogpost.publishers.cto51 import (
     Cto51Publisher,
     HOME_URL,
+    PUBLISH_URL,
     build_fill_script,
     build_settings_script,
 )
@@ -243,3 +244,21 @@ class ChromeTests(unittest.TestCase):
         self.assertIn("#selfType", script)
         self.assertIn("personalOk", script)
         self.assertIn("secondaryOk", script)
+
+    def test_sensitive_review_dialog_is_confirmed_without_reporting_success(self):
+        class Session:
+            @staticmethod
+            def evaluate(expression):
+                if "继续发布" in expression:
+                    return {
+                        "detected": True,
+                        "clicked": True,
+                        "term": "示例词",
+                    }
+                return {"url": PUBLISH_URL, "text": ""}
+
+        result = Cto51Publisher._wait_publish_result(Session(), timeout=0.1)
+
+        self.assertEqual(result.status, RunStatus.UNKNOWN)
+        self.assertIn("等待 51CTO 审核", result.message)
+        self.assertIn("示例词", result.message)

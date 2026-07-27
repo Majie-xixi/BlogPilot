@@ -72,6 +72,22 @@ return true;
 })()"""
 
 
+HANDLE_SENSITIVE_REVIEW_SCRIPT = """(() => {
+const visible=(el)=>!!el&&el.offsetParent!==null;
+const text=document.body?.innerText||'';
+const detected=/内容涉及敏感信息|进入待审核|非常抱歉[\\s\\S]{0,120}敏感信息/.test(text);
+const button=[...document.querySelectorAll('button')]
+  .find(el=>visible(el)&&el.textContent.trim()==='继续发布');
+const match=text.match(/博客(?:正文|标题)[：:]\\s*([^\\n\\r]+)/);
+if(detected&&button)button.click();
+return {
+  detected,
+  clicked:detected&&!!button,
+  term:match?.[1]?.trim()||''
+};
+})()"""
+
+
 def build_settings_script(
     category: str,
     secondary_category: str = "编程 Agent",
@@ -421,6 +437,17 @@ class Cto51Publisher:
     def _wait_publish_result(session: CdpSession, timeout: float = 12) -> PublishResult:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            review = session.evaluate(HANDLE_SENSITIVE_REVIEW_SCRIPT) or {}
+            if review.get("detected") and review.get("clicked"):
+                term = str(review.get("term", "")).strip()[:40]
+                term_detail = f"（平台提示：{term}）" if term else ""
+                return PublishResult(
+                    RunStatus.UNKNOWN,
+                    message=(
+                        f"已自动确认继续发布，文章正在等待 51CTO 审核{term_detail}；"
+                        "为防止重复，软件不会自动重试"
+                    ),
+                )
             state = session.evaluate("({url:location.href,text:document.body?.innerText||''})") or {}
             url = state.get("url", "")
             if isinstance(url, str) and "blog.51cto.com/" in url and "blogger/publish" not in url:

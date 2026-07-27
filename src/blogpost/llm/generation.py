@@ -60,6 +60,7 @@ class TopicPlanner:
 范围：{directions}。
 {keyword_hint}
 禁止：纯新闻、产品软文、虚构亲历、未经验证的性能数字。
+选题和摘要优先使用中性、专业表达，避免容易触发社区审核的敏感、煽动或行动指令式措辞。
 历史标题如下，必须避开：
 {history}
 只返回 JSON：{{"candidates":[{{"title":"...","summary":"...","direction":"..."}}]}}"""
@@ -109,7 +110,8 @@ class ArticleGenerator:
 3. 可以使用表格、引用和可验证的通用代码；
 4. 不得声称作者亲历未提供的项目，不得虚构版本、公司数据、基准数字、引用或链接；
 5. 避免“最新、今天、刚刚”等时效性说法；
-6. 内容必须与 AI 技术直接相关，不能写成新闻汇总或软文。
+6. 内容必须与 AI 技术直接相关，不能写成新闻汇总或软文；
+7. 优先使用中性、专业表达；在不损失技术准确性的前提下，避免容易触发社区审核的敏感、煽动或行动指令式措辞，改用风险行为、对抗场景、安全验证等表述。
 只输出 Markdown。"""
         raw = self.client.complete(
             [{"role": "system", "content": "你是重视原创、事实和工程细节的中文技术作者。"}, {"role": "user", "content": prompt}],
@@ -129,7 +131,7 @@ class ArticleRewriter:
     def rewrite(self, markdown: str, feedback: str) -> str:
         prompt = f"""根据质量反馈重写下面文章，保留主题但解决所有问题。
 反馈：{feedback}
-要求仍为原创 AI 技术文章，不得虚构经历或数字，只输出 Markdown。
+要求仍为原创 AI 技术文章，不得虚构经历或数字；优先使用中性、专业表达，在不损失技术准确性的前提下清理容易触发社区审核的敏感、煽动或行动指令式措辞。只输出 Markdown。
 
 原文：
 {markdown}"""

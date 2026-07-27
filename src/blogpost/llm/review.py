@@ -12,6 +12,7 @@ class ModelReviewer:
 
     def review(self, markdown: str) -> QualityReport:
         prompt = f"""审查下面 AI 技术博客。检查技术相关性、逻辑完整性、伪原创痕迹、虚构亲历、无法支持的数字和自相矛盾。
+同时检查社区发布适配性：如果存在容易触发社区审核、且能在不损失技术准确性的前提下改为中性专业表达的敏感、煽动或行动指令式措辞，必须返回 hard=true、code="platform_sensitive_wording" 的问题并给出改写建议。
 只返回 JSON：{{"passed":true,"score":0-100,"issues":[{{"code":"...","message":"...","hard":true}}]}}
 
 文章：

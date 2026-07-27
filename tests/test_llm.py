@@ -3,7 +3,7 @@ import unittest
 from urllib.error import HTTPError
 
 from blogpost.llm.client import LlmAuthError, OpenAICompatibleClient
-from blogpost.llm.generation import ArticleGenerator, TopicPlanner
+from blogpost.llm.generation import ArticleGenerator, ArticleRewriter, TopicPlanner
 from blogpost.corpus import CorpusItem
 from pathlib import Path
 
@@ -56,3 +56,37 @@ class LlmTests(unittest.TestCase):
         )
         self.assertEqual(article.title, "新标题")
         self.assertTrue(article.markdown.startswith("# 新标题"))
+
+    def test_generator_requests_platform_safe_wording(self):
+        class CapturingClient:
+            prompt = ""
+
+            def complete(self, messages, **kwargs):
+                self.prompt = "\n".join(message["content"] for message in messages)
+                return "# 新标题\n\n正文内容"
+
+        client = CapturingClient()
+
+        ArticleGenerator(client).generate(
+            title="新标题",
+            summary="摘要",
+            style_summary="风格简洁",
+        )
+
+        self.assertIn("中性、专业表达", client.prompt)
+        self.assertIn("社区审核", client.prompt)
+
+    def test_rewriter_keeps_platform_wording_constraint(self):
+        class CapturingClient:
+            prompt = ""
+
+            def complete(self, messages, **kwargs):
+                self.prompt = "\n".join(message["content"] for message in messages)
+                return "# 新标题\n\n正文内容"
+
+        client = CapturingClient()
+
+        ArticleRewriter(client).rewrite("# 新标题\n正文", "降低敏感措辞")
+
+        self.assertIn("中性、专业表达", client.prompt)
+        self.assertIn("社区审核", client.prompt)

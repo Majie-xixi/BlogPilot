@@ -28,3 +28,18 @@ class ReviewerTests(unittest.TestCase):
         report = ModelReviewer(FakeClient()).review("# 标题\n正文")
         self.assertFalse(report.passed)
         self.assertEqual(report.issues[0].code, "review_parse_error")
+
+    def test_reviewer_checks_platform_sensitive_wording(self):
+        class CapturingClient:
+            prompt = ""
+
+            def complete(self, messages, **kwargs):
+                self.prompt = "\n".join(message["content"] for message in messages)
+                return json.dumps({"passed": True, "score": 90, "issues": []})
+
+        client = CapturingClient()
+
+        ModelReviewer(client).review("# 标题\n正文")
+
+        self.assertIn("platform_sensitive_wording", client.prompt)
+        self.assertIn("社区审核", client.prompt)
