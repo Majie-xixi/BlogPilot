@@ -109,6 +109,18 @@ def format_monthly_status(
     return "51CTO 已连接 · 月度统计暂未识别"
 
 
+def resolve_today_status(
+    *,
+    local_published: bool,
+    online_published: bool | None,
+) -> str:
+    if local_published or online_published is True:
+        return "已发布"
+    if online_published is False:
+        return "尚未发布"
+    return "状态未知"
+
+
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
     match = re.match(
@@ -628,18 +640,16 @@ class MainWindow:
         snapshot = self.profile_snapshot
         if snapshot and snapshot.profile_url == account.profile_url.rstrip("/"):
             online_published = snapshot.has_publication_on(today)
-            if online_published is True:
-                self.today_value_var.set("已发布")
-            elif online_published is False and local_published:
-                self.today_value_var.set("状态待确认")
-            elif online_published is False:
-                self.today_value_var.set("尚未发布")
-            else:
-                self.today_value_var.set("已发布" if local_published else "状态未知")
+            self.today_value_var.set(
+                resolve_today_status(
+                    local_published=local_published,
+                    online_published=online_published,
+                )
+            )
 
             detail = format_monthly_status(snapshot.month_count, account.monthly_target)
             if online_published is False and local_published:
-                detail += " · 今日线上暂未显示"
+                detail += " · 今日已发布，线上统计同步中"
             self.today_detail_var.set(detail)
             return
 

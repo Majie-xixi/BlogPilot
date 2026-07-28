@@ -1,7 +1,7 @@
 from datetime import datetime
 import unittest
 
-from blogpost.ui.main_window import format_monthly_status
+from blogpost.ui.main_window import format_monthly_status, resolve_today_status
 
 
 class MonthlyStatusUiTests(unittest.TestCase):
@@ -33,6 +33,31 @@ class MonthlyStatusUiTests(unittest.TestCase):
         self.assertEqual(
             format_monthly_status(None, 21),
             "51CTO 已连接 · 月度统计暂未识别",
+        )
+
+    def test_successful_local_publish_is_not_downgraded_by_online_delay(self):
+        self.assertEqual(
+            resolve_today_status(
+                local_published=True,
+                online_published=False,
+            ),
+            "已发布",
+        )
+
+    def test_online_result_still_drives_status_without_local_record(self):
+        self.assertEqual(
+            resolve_today_status(
+                local_published=False,
+                online_published=True,
+            ),
+            "已发布",
+        )
+        self.assertEqual(
+            resolve_today_status(
+                local_published=False,
+                online_published=False,
+            ),
+            "尚未发布",
         )
 
 
