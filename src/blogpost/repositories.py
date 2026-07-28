@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+import json
 
 from blogpost.db import Database
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, Run, RunStatus, Trigger
@@ -146,6 +147,62 @@ class Repository:
                 (account_id, RunStatus.PUBLISHED.value, start.isoformat(), end.isoformat()),
             ).fetchone()
         return int(row["total"] or 0)
+
+    def save_profile_month_count(
+        self,
+        account_id: str,
+        profile_url: str,
+        checked_at: datetime,
+        count: int,
+    ) -> None:
+        if count < 0:
+            raise ValueError("月度文章数量不能为负数")
+        normalized_url = profile_url.strip().rstrip("/")
+        key = f"profile_month_count:{account_id}:{checked_at:%Y-%m}"
+        value = json.dumps(
+            {
+                "profile_url": normalized_url,
+                "year": checked_at.year,
+                "month": checked_at.month,
+                "count": count,
+                "checked_at": checked_at.isoformat(),
+            },
+            ensure_ascii=False,
+        )
+        with self.database.connect() as connection:
+            connection.execute(
+                """INSERT OR REPLACE INTO settings(key,value,updated_at)
+                VALUES(?,?,?)""",
+                (key, value, datetime.now().isoformat()),
+            )
+
+    def cached_profile_month_count(
+        self,
+        account_id: str,
+        profile_url: str,
+        year: int,
+        month: int,
+    ) -> tuple[int, datetime] | None:
+        key = f"profile_month_count:{account_id}:{year:04d}-{month:02d}"
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key=?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(str(row["value"]))
+            if (
+                str(payload["profile_url"]).rstrip("/") != profile_url.strip().rstrip("/")
+                or int(payload["year"]) != year
+                or int(payload["month"]) != month
+                or int(payload["count"]) < 0
+            ):
+                return None
+            return int(payload["count"]), datetime.fromisoformat(str(payload["checked_at"]))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
 
     def sync_online_publication(
         self,

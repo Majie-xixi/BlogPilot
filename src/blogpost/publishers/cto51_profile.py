@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from urllib.request import Request, urlopen
 
 
@@ -136,8 +137,15 @@ def fetch_profile_snapshot(
     if not re.fullmatch(r"https://blog\.51cto\.com/u_\d+", url):
         raise ValueError("51CTO 主页地址无效")
 
-    html = _download_profile_html(url, timeout)
-    return parse_profile_html(html, url, now=now)
+    for attempt in range(2):
+        try:
+            html = _download_profile_html(url, timeout)
+            return parse_profile_html(html, url, now=now)
+        except (OSError, subprocess.TimeoutExpired):
+            if attempt == 1:
+                raise
+            time.sleep(0.35)
+    raise RuntimeError("unreachable")
 
 
 def _download_profile_html(url: str, timeout: float) -> str:

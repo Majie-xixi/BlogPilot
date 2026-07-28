@@ -25,7 +25,7 @@ from blogpost.run_lock import RunLock
 from blogpost.scheduler import WindowsTaskScheduler
 from blogpost.secrets import DpapiSecretStore
 from blogpost.markdown import parse_markdown
-from blogpost.network import is_metered_connection
+from blogpost.network import internet_connection_status, is_metered_connection
 
 
 AccountProgress = Callable[[Account, RunStatus, str], None]
@@ -133,6 +133,21 @@ class ApplicationContext:
             and (not due_only or account.schedule_time <= now.time())
         ]
         callback = progress or (lambda account, status, message: None)
+        if internet_connection_status() is False:
+            message = "网络不可用，请检查网络连接后重试；未调用大模型，也未打开发布页面"
+            results = []
+            for account in accounts:
+                run = self.repository.create_run(trigger, account.id)
+                self.repository.update_run(
+                    run.id,
+                    RunStatus.FAILED,
+                    error_code="network_unavailable",
+                    error_summary=message,
+                )
+                result = PublishResult(RunStatus.FAILED, message=message)
+                callback(account, result.status, message)
+                results.append((account, result))
+            return results
         if trigger == Trigger.SCHEDULED and is_metered_connection():
             message = "检测到按流量计费网络，自动生成和发布已暂停"
             results = []

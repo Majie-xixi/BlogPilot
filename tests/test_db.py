@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import tempfile
 import unittest
@@ -30,3 +30,40 @@ class DatabaseTests(unittest.TestCase):
         self.repo.force_run_status(run.id, RunStatus.PUBLISHED)
         self.assertTrue(self.repo.has_successful_publication(date.today()))
         self.assertEqual(self.repo.count_successful_days(date.today().year, date.today().month), 1)
+
+    def test_profile_month_count_cache_round_trip(self):
+        checked_at = datetime(2026, 7, 28, 10, 0)
+        profile_url = "https://blog.51cto.com/u_987654"
+
+        self.repo.save_profile_month_count(
+            "default",
+            profile_url,
+            checked_at,
+            18,
+        )
+
+        self.assertEqual(
+            self.repo.cached_profile_month_count(
+                "default",
+                profile_url,
+                2026,
+                7,
+            ),
+            (18, checked_at),
+        )
+        self.assertIsNone(
+            self.repo.cached_profile_month_count(
+                "other",
+                profile_url,
+                2026,
+                7,
+            )
+        )
+        self.assertIsNone(
+            self.repo.cached_profile_month_count(
+                "default",
+                "https://blog.51cto.com/u_111111",
+                2026,
+                7,
+            )
+        )

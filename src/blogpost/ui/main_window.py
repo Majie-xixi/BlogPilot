@@ -14,6 +14,7 @@ import webbrowser
 
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
+from blogpost.network import internet_connection_status
 from blogpost.publishers.cto51_profile import ProfileSnapshot
 from blogpost.ui.account_dialog import (
     AccountManagerDialog,
@@ -23,7 +24,12 @@ from blogpost.ui.account_dialog import (
 from blogpost.ui.help_dialog import HelpDialog
 from blogpost.ui.settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
-from blogpost.ui.widgets import RoundedButton, RoundedPanel, RoundedProgressBar
+from blogpost.ui.widgets import (
+    NetworkStatusIcon,
+    RoundedButton,
+    RoundedPanel,
+    RoundedProgressBar,
+)
 
 
 STATUS_TEXT = {
@@ -83,6 +89,26 @@ def format_schedule_status(status: str, time_text: str) -> tuple[str, str]:
     return f"每天 {time_text}", f"Windows 计划任务已安装 · {state_text}"
 
 
+def format_monthly_status(
+    month_count: int | None,
+    monthly_target: int,
+    *,
+    checked_at: datetime | None = None,
+    online_error: bool = False,
+) -> str:
+    if month_count is not None:
+        remaining = max(0, monthly_target - month_count)
+        if online_error and checked_at is not None:
+            return (
+                f"无法连接 51CTO · 上次在线统计 "
+                f"{month_count}/{monthly_target} 篇 · 还差 {remaining} 篇"
+            )
+        return f"本月 {month_count}/{monthly_target} 篇 · 还差 {remaining} 篇"
+    if online_error:
+        return "无法连接 51CTO · 请检查网络后重试"
+    return "51CTO 已连接 · 月度统计暂未识别"
+
+
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
     match = re.match(
@@ -127,6 +153,7 @@ class MainWindow:
         self.profile_snapshot: ProfileSnapshot | None = None
         self.status_refreshing = False
         self.status_refresh_generation = 0
+        self.network_status: bool | None = None
         self.account_map: dict[str, Account] = {}
         self.current_account_id = DEFAULT_ACCOUNT_ID
         self.account_popup: tk.Toplevel | None = None
@@ -176,27 +203,29 @@ class MainWindow:
             icon="account",
             chevron=True,
         )
-        self.account_selector.grid(row=0, column=0, sticky="ew")
+        self.network_icon = NetworkStatusIcon(account_controls, outer=COLORS["page"])
+        self.network_icon.grid(row=0, column=0, padx=(0, 7))
+        self.account_selector.grid(row=0, column=1, sticky="ew")
         tk.Frame(
             account_controls,
             width=1,
             height=22,
             background=COLORS["border"],
-        ).grid(row=0, column=1, padx=(10, 2))
+        ).grid(row=0, column=2, padx=(10, 2))
         RoundedButton(
             account_controls,
             text="使用说明",
             command=self.open_help,
             variant="secondary",
             outer=COLORS["page"],
-        ).grid(row=0, column=2, padx=(8, 0))
+        ).grid(row=0, column=3, padx=(8, 0))
         RoundedButton(
             account_controls,
             text="账号管理",
             command=self.open_account_manager,
             variant="secondary",
             outer=COLORS["page"],
-        ).grid(row=0, column=3, padx=(8, 0))
+        ).grid(row=0, column=4, padx=(8, 0))
         RoundedButton(
             account_controls,
             text="全局设置",
@@ -204,7 +233,7 @@ class MainWindow:
             variant="secondary",
             outer=COLORS["page"],
         ).grid(
-            row=0, column=4, padx=(8, 0)
+            row=0, column=5, padx=(8, 0)
         )
 
         stats = ttk.Frame(page, style="Page.TFrame")
@@ -596,11 +625,6 @@ class MainWindow:
         today = date.today()
         account = self.current_account
         local_published = self.context.repository.has_successful_publication(today, account.id)
-        local_days = self.context.repository.count_successful_days(
-            today.year,
-            today.month,
-            account.id,
-        )
         snapshot = self.profile_snapshot
         if snapshot and snapshot.profile_url == account.profile_url.rstrip("/"):
             online_published = snapshot.has_publication_on(today)
@@ -613,25 +637,37 @@ class MainWindow:
             else:
                 self.today_value_var.set("已发布" if local_published else "状态未知")
 
-            if snapshot.month_count is not None:
-                remaining = max(0, account.monthly_target - snapshot.month_count)
-                detail = f"本月 {snapshot.month_count}/{account.monthly_target} 篇 · 还差 {remaining} 篇"
-            else:
-                detail = f"51CTO 今日已核对 · 软件记录本月 {local_days} 天"
+            detail = format_monthly_status(snapshot.month_count, account.monthly_target)
             if online_published is False and local_published:
-                detail = "软件记录显示已发布，但 51CTO 主页暂未显示"
+                detail += " · 今日线上暂未显示"
             self.today_detail_var.set(detail)
             return
 
-        self.today_value_var.set("已发布" if local_published else "尚未发布")
         if self.status_refreshing:
+            self.today_value_var.set("已发布" if local_published else "正在同步")
             self.today_detail_var.set("正在同步 51CTO 公开主页…")
         elif error:
-            self.today_detail_var.set(f"在线核对失败 · 仅软件记录本月 {local_days} 天")
+            self.today_value_var.set("已发布" if local_published else "状态未知")
+            cached = self.context.repository.cached_profile_month_count(
+                account.id,
+                account.profile_url,
+                today.year,
+                today.month,
+            )
+            self.today_detail_var.set(
+                format_monthly_status(
+                    cached[0] if cached else None,
+                    account.monthly_target,
+                    checked_at=cached[1] if cached else None,
+                    online_error=True,
+                )
+            )
         elif not account.profile_url:
-            self.today_detail_var.set("未设置 51CTO 主页 · 仅显示软件记录")
+            self.today_value_var.set("已发布" if local_published else "状态未知")
+            self.today_detail_var.set("未设置 51CTO 主页")
         else:
-            self.today_detail_var.set(f"仅软件记录：本月已发布 {local_days} 天")
+            self.today_value_var.set("已发布" if local_published else "状态未知")
+            self.today_detail_var.set("等待同步 51CTO 月度统计")
 
     def _start_runtime_status_refresh(self, *, force: bool = False) -> None:
         if self.status_refreshing and not force:
@@ -648,11 +684,15 @@ class MainWindow:
         def worker() -> None:
             snapshot = None
             profile_error = None
-            try:
-                if profile_url:
-                    snapshot = publisher.profile_status()
-            except Exception as exc:
-                profile_error = str(exc)
+            network_status = internet_connection_status()
+            if network_status is False:
+                profile_error = "网络不可用，请检查网络连接"
+            else:
+                try:
+                    if profile_url:
+                        snapshot = publisher.profile_status()
+                except Exception as exc:
+                    profile_error = str(exc)
             try:
                 schedule_status = self.context.scheduler.status()
             except Exception as exc:
@@ -666,6 +706,7 @@ class MainWindow:
                     snapshot,
                     profile_error,
                     schedule_status,
+                    network_status,
                 )
             )
 
@@ -679,12 +720,25 @@ class MainWindow:
         snapshot: ProfileSnapshot | None,
         profile_error: str | None,
         schedule_status: str,
+        network_status: bool | None,
     ) -> None:
         if generation != self.status_refresh_generation or account_id != self.current_account_id:
             return
         self.status_refreshing = False
+        self.network_status = True if snapshot is not None else network_status
+        self.network_icon.set_status(self.network_status)
         if profile_url == self.current_account.profile_url.rstrip("/"):
             self.profile_snapshot = snapshot
+            if snapshot and snapshot.month_count is not None:
+                try:
+                    self.context.repository.save_profile_month_count(
+                        account_id,
+                        snapshot.profile_url,
+                        snapshot.checked_at,
+                        snapshot.month_count,
+                    )
+                except Exception:
+                    pass
             if (
                 snapshot
                 and snapshot.display_name
@@ -828,8 +882,24 @@ class MainWindow:
     def open_settings(self) -> None:
         SettingsDialog(self.root, self.context, self.refresh)
 
+    def _network_preflight(self) -> bool:
+        status = internet_connection_status()
+        self.network_status = status
+        self.network_icon.set_status(status)
+        if status is not False:
+            return True
+        message = "网络不可用，请检查网络连接后重试；未调用大模型，也未打开发布页面"
+        self._clear_log()
+        self._show_log_view()
+        self._append_log(message, "error")
+        self.hero_title_var.set("网络不可用")
+        self.progress_var.set("请连接网络后重试")
+        return False
+
     def run_now(self) -> None:
         if self.running:
+            return
+        if not self._network_preflight():
             return
         allow = False
         online_published = (
@@ -862,6 +932,8 @@ class MainWindow:
 
     def retry_latest_article(self) -> None:
         if self.running:
+            return
+        if not self._network_preflight():
             return
         account_id = self.current_account_id
         path_text = self.context.repository.latest_article_path(account_id)

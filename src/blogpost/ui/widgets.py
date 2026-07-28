@@ -7,6 +7,24 @@ from tkinter import ttk
 from blogpost.ui.theme import COLORS, FONT
 
 
+_ICON_FONT_FAMILY: str | None = None
+
+
+def _icon_font(master, size: int) -> tuple[str, int]:
+    global _ICON_FONT_FAMILY
+    if _ICON_FONT_FAMILY is None:
+        families = set(tkfont.families(master))
+        _ICON_FONT_FAMILY = next(
+            (
+                name
+                for name in ("Segoe Fluent Icons", "Segoe MDL2 Assets", "Segoe UI Symbol")
+                if name in families
+            ),
+            "Segoe UI Symbol",
+        )
+    return _ICON_FONT_FAMILY, size
+
+
 def _master_background(master) -> str:
     try:
         return str(master.cget("background"))
@@ -186,6 +204,80 @@ class RoundedPanel(tk.Canvas):
         )
 
 
+class NetworkStatusIcon(tk.Canvas):
+    """Compact Wi-Fi status indicator with hover-only explanatory text."""
+
+    def __init__(self, master, *, outer: str | None = None, **kwargs):
+        background = outer or _master_background(master)
+        super().__init__(
+            master,
+            width=28,
+            height=28,
+            background=background,
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2",
+            **kwargs,
+        )
+        self._status: bool | None = None
+        self._tooltip: tk.Toplevel | None = None
+        self.bind("<Configure>", self._draw)
+        self.bind("<Enter>", self._show_tooltip)
+        self.bind("<Leave>", self._hide_tooltip)
+        self.after_idle(self._draw)
+
+    def set_status(self, status: bool | None) -> None:
+        self._status = status
+        self._draw()
+
+    def _draw(self, _event=None) -> None:
+        self.delete("all")
+        color = (
+            COLORS["success"]
+            if self._status is True
+            else COLORS["danger"]
+            if self._status is False
+            else COLORS["muted"]
+        )
+        self.create_text(
+            14,
+            14,
+            text="\ue701",
+            fill=color,
+            font=_icon_font(self, 15),
+        )
+
+    def _show_tooltip(self, _event=None) -> None:
+        self._hide_tooltip()
+        message = (
+            "网络正常"
+            if self._status is True
+            else "网络不可用，请检查网络连接"
+            if self._status is False
+            else "正在检查网络状态"
+        )
+        tooltip = tk.Toplevel(self)
+        self._tooltip = tooltip
+        tooltip.overrideredirect(True)
+        tooltip.attributes("-topmost", True)
+        tooltip.configure(background=COLORS["text"])
+        tk.Label(
+            tooltip,
+            text=message,
+            background=COLORS["text"],
+            foreground=COLORS["surface"],
+            font=(FONT, 9),
+            padx=9,
+            pady=6,
+        ).pack()
+        tooltip.geometry(f"+{self.winfo_rootx() - 4}+{self.winfo_rooty() + 32}")
+
+    def _hide_tooltip(self, _event=None) -> None:
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
+
+
 class RoundedButton(tk.Canvas):
     """Modern rounded button with the subset of Button API used by the app."""
 
@@ -320,45 +412,24 @@ class RoundedButton(tk.Canvas):
         if self._icon == "account":
             icon_x = self._padding_x + 7
             icon_color = COLORS["subtle"] if self._state == "disabled" else COLORS["muted"]
-            self.create_oval(
-                icon_x - 3,
-                height // 2 - 8,
-                icon_x + 3,
-                height // 2 - 2,
-                outline=icon_color,
-                width=2,
-                tags="button-icon",
-            )
-            self.create_line(
-                icon_x - 7,
-                height // 2 + 7,
-                icon_x - 5,
-                height // 2 + 2,
+            self.create_text(
                 icon_x,
                 height // 2,
-                icon_x + 5,
-                height // 2 + 2,
-                icon_x + 7,
-                height // 2 + 7,
-                smooth=True,
-                width=2,
+                text="\ue77b",
                 fill=icon_color,
+                font=_icon_font(self, 14),
                 tags="button-icon",
             )
         if self._chevron:
             chevron_x = width - self._padding_x - 4
             chevron_y = height // 2
             chevron_color = COLORS["subtle"] if self._state == "disabled" else COLORS["muted"]
-            self.create_line(
-                chevron_x - 4,
-                chevron_y - 2,
+            self.create_text(
                 chevron_x,
-                chevron_y + 2,
-                chevron_x + 4,
                 chevron_y - 2,
+                text="\ue70d",
                 fill=chevron_color,
-                width=1,
-                smooth=True,
+                font=_icon_font(self, 9),
                 tags="button-chevron",
             )
 
