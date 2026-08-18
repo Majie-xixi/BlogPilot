@@ -134,6 +134,39 @@ class ChromeTests(unittest.TestCase):
         self.assertEqual(selected, 9230)
         self.assertIn("--remote-debugging-port=9230", popen.call_args.args[0])
 
+    def test_ensure_running_restarts_after_stale_debug_port(self):
+        with tempfile.TemporaryDirectory() as root:
+            controller = ChromeController(
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(root) / "profile",
+            )
+            controller.port = 9229
+            with (
+                patch.object(controller, "version", side_effect=ConnectionRefusedError()),
+                patch.object(controller, "start", return_value=9230) as start,
+                patch("blogpost.browser.chrome.time.sleep"),
+            ):
+                restarted = controller.ensure_running("https://blog.51cto.com")
+
+        self.assertTrue(restarted)
+        start.assert_called_once_with("https://blog.51cto.com", timeout=15)
+
+    def test_ensure_running_keeps_healthy_debug_port(self):
+        with tempfile.TemporaryDirectory() as root:
+            controller = ChromeController(
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(root) / "profile",
+            )
+            controller.port = 9229
+            with (
+                patch.object(controller, "version", return_value={"Browser": "Chrome"}),
+                patch.object(controller, "start") as start,
+            ):
+                restarted = controller.ensure_running("https://blog.51cto.com")
+
+        self.assertFalse(restarted)
+        start.assert_not_called()
+
     def test_second_account_publisher_uses_a_different_port(self):
         account = Account(
             id="account-two",
@@ -262,3 +295,15 @@ class ChromeTests(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.UNKNOWN)
         self.assertIn("等待 51CTO 审核", result.message)
         self.assertIn("示例词", result.message)
+
+    def test_connection_loss_before_final_click_is_safe_to_retry(self):
+        result = Cto51Publisher._browser_connection_lost_result(False)
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertIn("重新发布最近文章", result.message)
+
+    def test_connection_loss_after_final_click_is_never_retried(self):
+        result = Cto51Publisher._browser_connection_lost_result(True)
+
+        self.assertEqual(result.status, RunStatus.UNKNOWN)
+        self.assertIn("不会自动重试", result.message)

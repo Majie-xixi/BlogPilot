@@ -108,6 +108,31 @@ class ChromeController:
             return candidate
         raise OSError(f"没有可用的 {self.browser_name} 调试端口")
 
+    def ensure_running(self, url: str, timeout: float = 15) -> bool:
+        """Ensure the owned browser endpoint is healthy; return True after a restart."""
+        if self.port is not None:
+            for _ in range(3):
+                try:
+                    self.version()
+                    return False
+                except (URLError, ConnectionError, OSError):
+                    time.sleep(0.2)
+            self._discard_stale_process()
+        self.start(url, timeout=timeout)
+        return True
+
+    def _discard_stale_process(self) -> None:
+        process = self.process
+        self.process = None
+        self.port = None
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
     def start(self, url: str, timeout: float = 15, port: int | None = None) -> int:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         if self.process is not None and self.process.poll() is None and self.port is not None:
@@ -116,7 +141,9 @@ class ChromeController:
                 self.open_tab(url)
                 return self.port
             except (URLError, ConnectionError, OSError):
-                pass
+                self._discard_stale_process()
+        elif self.port is not None:
+            self._discard_stale_process()
         preferred_port = self.default_port if port is None else port
         self.port = self.find_available_port(preferred_port)
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

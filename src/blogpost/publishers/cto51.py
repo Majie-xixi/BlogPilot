@@ -8,6 +8,7 @@ import time
 
 from blogpost.browser.cdp import CdpSession
 from blogpost.browser.chrome import ChromeController
+from blogpost.browser.websocket import WebSocketError
 from blogpost.domain import Article, PublishResult, RunStatus
 from blogpost.publishers.diagnostics import save_diagnostic
 from blogpost.publishers.cto51_profile import ProfileSnapshot, fetch_profile_snapshot
@@ -179,7 +180,17 @@ class Cto51Publisher:
             raise ValueError("请先在设置中填写目标 51CTO 博客主页")
         return fetch_profile_snapshot(self.expected_profile_url)
 
+    def _ensure_browser(self, url: str) -> bool:
+        ensure = getattr(self.chrome, "ensure_running", None)
+        if callable(ensure):
+            return bool(ensure(url))
+        if self.chrome.port is None:
+            self.chrome.start(url)
+            return True
+        return False
+
     def publish(self, article: Article, category: str, dry_run: bool) -> PublishResult:
+        final_clicked = False
         try:
             if self.expected_profile_url:
                 current_profile = self._current_profile_url()
@@ -194,9 +205,9 @@ class Cto51Publisher:
                         RunStatus.FAILED,
                         message=f"51CTO 账号不匹配，已停止发布。当前：{current_profile}；目标：{expected}",
                     )
-            if self.chrome.port is None:
+            browser_restarted = self._ensure_browser(PUBLISH_URL)
+            if browser_restarted:
                 # start() already opens the URL; reuse it instead of creating a duplicate tab.
-                self.chrome.start(PUBLISH_URL)
                 target = self.chrome.wait_for_target(PUBLISH_URL)
             else:
                 target = self.chrome.open_tab(PUBLISH_URL)
@@ -269,15 +280,32 @@ class Cto51Publisher:
                 )
                 if not clicked:
                     return PublishResult(RunStatus.FAILED, message="找不到最终发布按钮，已停止")
+                final_clicked = True
                 return self._wait_publish_result(session)
         except TimeoutError as exc:
+            if final_clicked:
+                return self._browser_connection_lost_result(True)
             return PublishResult(RunStatus.FAILED, message=str(exc))
+        except (OSError, WebSocketError):
+            return self._browser_connection_lost_result(final_clicked)
         except Exception as exc:
             return PublishResult(RunStatus.FAILED, message=f"51CTO 发布失败：{exc}")
 
+    @staticmethod
+    def _browser_connection_lost_result(final_clicked: bool) -> PublishResult:
+        if final_clicked:
+            return PublishResult(
+                RunStatus.UNKNOWN,
+                message="已点击发布，但浏览器自动化连接中断，结果待确认；为防止重复，软件不会自动重试",
+            )
+        return PublishResult(
+            RunStatus.FAILED,
+            message="浏览器自动化连接已失效，软件已停止本次操作；请使用“重新发布最近文章”重试",
+        )
+
     def _current_profile_url(self) -> str:
-        if self.chrome.port is None:
-            self.chrome.start(HOME_URL)
+        browser_restarted = self._ensure_browser(HOME_URL)
+        if browser_restarted:
             target = self.chrome.wait_for_target(HOME_URL)
         else:
             targets = [
