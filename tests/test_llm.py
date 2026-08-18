@@ -75,6 +75,8 @@ class LlmTests(unittest.TestCase):
 
         self.assertIn("中性、专业表达", client.prompt)
         self.assertIn("社区审核", client.prompt)
+        self.assertIn("漏洞、黑客、攻击", client.prompt)
+        self.assertIn("风险缺口", client.prompt)
 
     def test_rewriter_keeps_platform_wording_constraint(self):
         class CapturingClient:
@@ -90,3 +92,5 @@ class LlmTests(unittest.TestCase):
 
         self.assertIn("中性、专业表达", client.prompt)
         self.assertIn("社区审核", client.prompt)
+        self.assertIn("漏洞、黑客、攻击", client.prompt)
+        self.assertIn("高风险参与者", client.prompt)

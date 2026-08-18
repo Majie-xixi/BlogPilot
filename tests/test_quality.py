@@ -26,3 +26,20 @@ class QualityTests(unittest.TestCase):
         codes = {issue.code for issue in report.issues}
         self.assertIn("secret", codes)
         self.assertIn("duplicate_title", codes)
+
+    def test_platform_sensitive_wording_is_blocked_before_publish(self):
+        content = "# AI 安全设计\n\n" + (
+            "AI Agent 需要识别漏洞利用与黑客攻击，并阻止入侵。" * 80
+        )
+
+        report = QualityGate(min_chinese_chars=100).check(content, [])
+
+        issue = next(
+            item
+            for item in report.issues
+            if item.code == "platform_sensitive_wording"
+        )
+        self.assertFalse(report.passed)
+        self.assertIn("漏洞", issue.message)
+        self.assertIn("黑客", issue.message)
+        self.assertIn("风险缺口", issue.message)

@@ -17,6 +17,20 @@ _SECRET = re.compile(
     r"(?i)(?:api[_-]?key|authorization|password|secret)\s*[=:]\s*\S+|\bsk-[A-Za-z0-9_-]{6,}"
 )
 _DANGEROUS_HTML = re.compile(r"<\s*(script|iframe|object|embed)\b", re.IGNORECASE)
+_PLATFORM_SENSITIVE_WORDING = {
+    "漏洞": "风险缺口或薄弱点",
+    "黑客": "高风险参与者",
+    "攻击": "对抗行为或异常请求",
+    "入侵": "未授权访问",
+    "破解": "非授权解析",
+    "木马": "恶意程序",
+    "病毒": "恶意程序",
+    "勒索": "恶意加密事件",
+    "窃取": "非授权获取",
+    "绕过": "规避",
+    "渗透": "安全验证",
+    "提权": "权限异常提升",
+}
 
 
 class QualityGate:
@@ -47,6 +61,20 @@ class QualityGate:
             issues.append(QualityIssue("secret", "文章疑似包含密钥或口令"))
         if _DANGEROUS_HTML.search(markdown):
             issues.append(QualityIssue("dangerous_html", "文章包含危险 HTML"))
+        sensitive_terms = [
+            term for term in _PLATFORM_SENSITIVE_WORDING if term in markdown
+        ]
+        if sensitive_terms:
+            suggestions = "；".join(
+                f"“{term}”改为“{_PLATFORM_SENSITIVE_WORDING[term]}”"
+                for term in sensitive_terms
+            )
+            issues.append(
+                QualityIssue(
+                    "platform_sensitive_wording",
+                    f"检测到可能触发平台审核的措辞：{suggestions}",
+                )
+            )
 
         digest = sha256((markdown.rstrip() + "\n").encode("utf-8")).hexdigest()
         for item in corpus:
