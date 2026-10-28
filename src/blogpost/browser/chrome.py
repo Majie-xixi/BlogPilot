@@ -108,8 +108,62 @@ class ChromeController:
             return candidate
         raise OSError(f"没有可用的 {self.browser_name} 调试端口")
 
+    def _find_running_profile_port(self) -> int | None:
+        """Recover only a listener owned by this executable and dedicated profile."""
+        if os.name != "nt":
+            return None
+        executable = str(self.executable.resolve()).replace("'", "''")
+        profile = str(self.profile_dir.resolve()).replace("'", "''")
+        name = self.executable.name.replace("'", "''")
+        script = (
+            "$ErrorActionPreference='Stop';"
+            f"$expectedExecutable='{executable}';$expectedProfile='{profile}';"
+            f"$browserProcesses=@(Get-CimInstance Win32_Process -Filter \"Name='{name}'\");"
+            + r"""
+$profileInUse=$false
+foreach($browserProcess in $browserProcesses) {
+    if($browserProcess.ExecutablePath -ne $expectedExecutable) { continue }
+    if($browserProcess.CommandLine -match '(?:^|\s)"?--type=') { continue }
+    $profileArgument=[regex]::Match($browserProcess.CommandLine,
+        '(?:^|\s)(?:"--user-data-dir=(?<profile>[^"]+)"|--user-data-dir="(?<profile>[^"]+)"|--user-data-dir=(?<profile>[^\s"]+))(?=\s|$)')
+    if(-not $profileArgument.Success) { continue }
+    $actualProfile=[IO.Path]::GetFullPath($profileArgument.Groups['profile'].Value).TrimEnd('\')
+    if($actualProfile -ne $expectedProfile) { continue }
+    $profileInUse=$true
+    $portArgument=[regex]::Match($browserProcess.CommandLine,
+        '(?:^|\s)"?--remote-debugging-port=(\d+)"?(?=\s|$)')
+    if(-not $portArgument.Success) { continue }
+    $debugPort=[int]$portArgument.Groups[1].Value
+    if($debugPort -lt 1 -or $debugPort -gt 65535) { continue }
+    $listener=Get-NetTCPConnection -State Listen -OwningProcess $browserProcess.ProcessId -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -eq $debugPort -and $_.LocalAddress -in @('127.0.0.1','::1') }
+    if($listener) { Write-Output $debugPort; exit 0 }
+}
+if($profileInUse) { Write-Output 0 }
+"""
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if completed.returncode != 0:
+                raise ValueError("browser ownership probe failed")
+            value = completed.stdout.strip()
+            if not value:
+                return None
+            port = int(value)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            raise ConnectionError(f"无法检查 {self.browser_name} 专用窗口的进程与端口，请稍后重试") from exc
+        if not 1 <= port <= 65535:
+            raise ConnectionError(f"{self.browser_name} 专用窗口已打开但调试端口不可用，请关闭该专用窗口后重试")
+        return port
+
     def ensure_running(self, url: str, timeout: float = 15) -> bool:
-        """Ensure the owned browser endpoint is healthy; return True after a restart."""
+        """Ensure a healthy endpoint; return True when start() opened the requested URL."""
         if self.port is not None:
             for _ in range(3):
                 try:
@@ -144,6 +198,16 @@ class ChromeController:
                 self._discard_stale_process()
         elif self.port is not None:
             self._discard_stale_process()
+        existing_port = self._find_running_profile_port()
+        if existing_port is not None:
+            self.port = existing_port
+            try:
+                self.version()
+            except (URLError, ConnectionError, OSError, ValueError) as exc:
+                self.port = None
+                raise ConnectionError(f"{self.browser_name} 专用窗口的调试连接不可用，请关闭该专用窗口后重试") from exc
+            self.open_tab(url)
+            return self.port
         preferred_port = self.default_port if port is None else port
         self.port = self.find_available_port(preferred_port)
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
