@@ -979,11 +979,14 @@ class MainWindow:
         self.queue.put(("done", result))
 
     def _run_worker(self, pipeline, allow: bool) -> None:
-        result = pipeline.run(
-            Trigger.MANUAL,
-            allow_same_day=allow,
-            progress=lambda status, message: self.queue.put(("progress", status, message)),
-        )
+        try:
+            result = pipeline.run(
+                Trigger.MANUAL,
+                allow_same_day=allow,
+                progress=lambda status, message: self.queue.put(("progress", status, message)),
+            )
+        except Exception as exc:
+            result = PublishResult(RunStatus.FAILED, message=str(exc))
         self.queue.put(("done", result))
 
     def open_batch_publish(self) -> None:

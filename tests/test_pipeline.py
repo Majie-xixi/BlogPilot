@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from blogpost.article_store import ArticleStore
 from blogpost.config import AppConfig
@@ -9,6 +10,7 @@ from blogpost.db import Database
 from blogpost.domain import Article, PublishResult, QualityIssue, QualityReport, RunStatus, Trigger
 from blogpost.llm.generation import Topic
 from blogpost.pipeline import PublishingPipeline
+from blogpost.publishers.cto51 import Cto51Publisher
 from blogpost.repositories import Repository
 from blogpost.run_lock import RunLock
 
@@ -121,3 +123,56 @@ class PipelineTests(unittest.TestCase):
         result = self.pipeline.run(Trigger.SCHEDULED)
         self.assertEqual(result.status, RunStatus.SKIPPED)
         self.assertEqual(self.publisher.calls, 1)
+
+    def test_unknown_online_status_stops_before_generation_and_finishes_run(self):
+        self.publisher.expected_profile_url = "https://blog.51cto.com/u_123456"
+        self.publisher.has_publication_on = lambda day: None
+        events = []
+        with (
+            patch.object(
+                self.pipeline.planner,
+                "choose",
+                side_effect=AssertionError("must not plan with unknown online status"),
+            ),
+            patch.object(
+                self.pipeline.generator,
+                "generate",
+                side_effect=AssertionError("must not generate with unknown online status"),
+            ),
+        ):
+            result = self.pipeline.run(
+                Trigger.MANUAL,
+                progress=lambda status, message: events.append((status, message)),
+            )
+
+        self.assertEqual(result.status, RunStatus.UNKNOWN)
+        self.assertIn("无法核对 51CTO 今日发布状态", result.message)
+        run = next(iter(self.repo.recent_runs(1)))
+        self.assertEqual(run.status, RunStatus.UNKNOWN)
+        self.assertIsNotNone(run.finished_at)
+        self.assertEqual(run.error_code, "online_status_unknown")
+        self.assertEqual(run.error_summary, result.message)
+        self.assertEqual(events, [(RunStatus.UNKNOWN, result.message)])
+        self.assertEqual(self.publisher.calls, 0)
+        self.assertEqual(list(self.cfg.generated_dir.glob("*.md")), [])
+        self.assertFalse(self.pipeline.run_lock.path.exists())
+
+    def test_explicit_empty_profile_allows_first_article(self):
+        html = (Path(__file__).parent / "fixtures" / "cto51_empty_profile.html").read_text(
+            encoding="utf-8"
+        )
+        publisher = Cto51Publisher(
+            None, Path(self.temp.name) / "diagnostics", "https://blog.51cto.com/u_987654"
+        )
+        self.pipeline.publisher = publisher
+        with (
+            patch("blogpost.publishers.cto51_profile._download_profile_html", return_value=html),
+            patch.object(Cto51Publisher, "publish", return_value=PublishResult(RunStatus.PUBLISHED)),
+        ):
+            result = self.pipeline.run(Trigger.MANUAL)
+
+        self.assertEqual(result.status, RunStatus.PUBLISHED)
+        self.assertTrue(Path(result.article_path).exists())
+        run = next(iter(self.repo.recent_runs(1)))
+        self.assertEqual(run.status, RunStatus.PUBLISHED)
+        self.assertIsNotNone(run.finished_at)
