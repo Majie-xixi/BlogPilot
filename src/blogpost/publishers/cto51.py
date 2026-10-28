@@ -264,10 +264,13 @@ class Cto51Publisher:
                         )
                         if not ok
                     ]
-                    return self._diagnostic_failure(
-                        session,
-                        f"51CTO 发布设置未完成：{'、'.join(missing)}",
-                    )
+                    reason = f"51CTO 发布设置未完成：{'、'.join(missing)}"
+                    if not settings.get("personalOk"):
+                        reason += (
+                            f"。请先在 51CTO 创建或确认个人分类“{self.personal_category}”，"
+                            "点击分类旁的“刷新”后重试；也可在软件账号管理中改为已有分类"
+                        )
+                    return self._diagnostic_failure(session, reason)
 
                 if dry_run:
                     return PublishResult(
