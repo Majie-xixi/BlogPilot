@@ -14,6 +14,7 @@ from blogpost.corpus import CorpusIndexer
 from blogpost.db import Database
 from blogpost.domain import Account, Article, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
 from blogpost.llm.client import OpenAICompatibleClient
+from blogpost.llm.codex import CodexClient
 from blogpost.llm.generation import ArticleGenerator, ArticleRewriter, TopicPlanner
 from blogpost.llm.review import ModelReviewer
 from blogpost.paths import app_data_dir, browser_profile_dir, config_path, database_path
@@ -79,18 +80,19 @@ class ApplicationContext:
         )
 
     def build_pipeline(self, account_id: str = DEFAULT_ACCOUNT_ID) -> PublishingPipeline:
-        api_key = self.secrets.get_api_key()
-        if not api_key:
-            raise ValueError("请先在设置中填写大模型 API Key")
         account = self.account(account_id)
         if not account.enabled:
             raise ValueError(f"账号“{account.display_name}”已停用")
         config = self.config_for_account(account_id)
-        client = OpenAICompatibleClient(
-            config.api_base_url,
-            config.model,
-            api_key,
-        )
+        if config.provider == "codex":
+            client = CodexClient()
+        elif config.provider == "api":
+            api_key = self.secrets.get_api_key()
+            if not api_key:
+                raise ValueError("请先在设置中填写大模型 API Key")
+            client = OpenAICompatibleClient(config.api_base_url, config.model, api_key)
+        else:
+            raise ValueError("无效的大模型服务")
         return PublishingPipeline(
             config,
             self.repository,

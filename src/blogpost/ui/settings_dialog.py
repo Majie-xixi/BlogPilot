@@ -50,6 +50,7 @@ class SettingsDialog(Toplevel):
         cfg = context.config
         self._saved_api_key, self._api_key_read_error = self._read_saved_api_key()
         self.vars = {
+            "provider": StringVar(value=cfg.provider),
             "api_base_url": StringVar(value=cfg.api_base_url),
             "model": StringVar(value=cfg.model),
             "api_key": StringVar(value=self._saved_api_key),
@@ -112,17 +113,22 @@ class SettingsDialog(Toplevel):
         api_card = api_panel.content
         api_card.columnconfigure(0, weight=1)
         ttk.Label(api_card, text="大模型服务", style="CardValue.TLabel").grid(row=0, column=0, sticky="w")
+        provider_row = ttk.Frame(api_card, style="Surface.TFrame")
+        provider_row.grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Radiobutton(provider_row, text="API 服务", variable=self.vars["provider"], value="api").pack(side="left")
+        ttk.Radiobutton(provider_row, text="Codex 登录", variable=self.vars["provider"], value="codex").pack(side="left", padx=(18, 0))
         ttk.Label(
             api_card,
-            text="使用 DeepSeek 的 OpenAI 格式；Anthropic 地址仅供 Claude Code 等工具使用",
+            text="Codex 模式使用本机 CLI 的登录和模型配置；请先安装并登录 Codex。下方 API 配置仅在 API 模式生效。",
             style="CardDetail.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(3, 14))
-        self._field(api_card, 2, "API Base URL（OpenAI 格式）", "api_base_url")
-        self._field(api_card, 4, "模型名称", "model")
+            wraplength=510,
+        ).grid(row=2, column=0, sticky="w", pady=(6, 14))
+        self._field(api_card, 3, "API Base URL（OpenAI 格式）", "api_base_url")
+        self._field(api_card, 5, "模型名称（API 模式）", "model")
 
-        ttk.Label(api_card, text="API Key", style="Field.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 6))
+        ttk.Label(api_card, text="API Key（API 模式）", style="Field.TLabel").grid(row=7, column=0, sticky="w", pady=(12, 6))
         key_row = ttk.Frame(api_card, style="Surface.TFrame")
-        key_row.grid(row=7, column=0, sticky="ew")
+        key_row.grid(row=8, column=0, sticky="ew")
         key_row.columnconfigure(0, weight=1)
         self.key_entry = ttk.Entry(
             key_row,
@@ -142,12 +148,12 @@ class SettingsDialog(Toplevel):
             api_card,
             textvariable=self.api_key_status,
             style="CardDetail.TLabel",
-        ).grid(row=8, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=9, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             api_card,
             text="输入框留空不会删除密钥；如需更换，直接输入新 Key 后保存",
             style="CardDetail.TLabel",
-        ).grid(row=9, column=0, sticky="w", pady=(3, 0))
+        ).grid(row=10, column=0, sticky="w", pady=(3, 0))
 
         publish_panel = RoundedPanel(
             self.scroll_content,
@@ -196,7 +202,7 @@ class SettingsDialog(Toplevel):
             row=row,
             column=0,
             sticky="w",
-            pady=(0 if row == 2 else 12, 6),
+            pady=(0 if row == 3 else 12, 6),
         )
         ttk.Entry(parent, textvariable=self.vars[name], style="Modern.TEntry").grid(
             row=row + 1,
@@ -272,6 +278,7 @@ class SettingsDialog(Toplevel):
                 schedule_time=old.schedule_time,
                 api_base_url=self.vars["api_base_url"].get().strip(),
                 model=self.vars["model"].get().strip(),
+                provider=self.vars["provider"].get(),
                 category=old.category,
                 profile_url=old.profile_url,
                 dry_run=self.vars["dry_run"].get(),
@@ -284,7 +291,7 @@ class SettingsDialog(Toplevel):
             cfg.validate_for_run()
             cfg.save(config_path())
             api_key = self.vars["api_key"].get().strip()
-            if api_key:
+            if cfg.provider == "api" and api_key:
                 self.context.secrets.set_api_key(api_key)
             self.context.config = cfg
             self.on_saved()

@@ -1,0 +1,76 @@
+import subprocess
+import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from blogpost.llm.client import LlmError
+from blogpost.llm.codex import CodexClient
+
+
+class CodexClientTests(unittest.TestCase):
+    @patch("blogpost.llm.codex.subprocess.run")
+    def test_completion_passes_prompt_via_stdin_and_returns_output(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, stdout='{"ok": true}\n', stderr='')
+        client = CodexClient()
+        self.assertEqual(client.complete([{"role": "user", "content": "中文选题"}], json_mode=True), '{"ok": true}')
+        args, kwargs = run.call_args
+        self.assertIn('--ephemeral', args[0])
+        self.assertIn('read-only', args[0])
+        self.assertNotIn('中文选题', ' '.join(args[0]))
+        self.assertIn('中文选题', kwargs['input'])
+
+    @patch("blogpost.llm.codex.subprocess.run")
+    def test_failure_does_not_expose_cli_output(self, run):
+        run.return_value = subprocess.CompletedProcess([], 1, stdout='', stderr='secret diagnostic')
+        with self.assertRaises(LlmError) as caught:
+            CodexClient().complete([{"role": "user", "content": "x"}])
+        self.assertNotIn('secret diagnostic', str(caught.exception))
+
+    @patch("blogpost.llm.codex.subprocess.run", side_effect=FileNotFoundError())
+    def test_missing_codex_is_reported(self, run):
+        with self.assertRaisesRegex(LlmError, 'Codex'):
+            CodexClient().complete([])
+
+    @patch("blogpost.llm.codex.subprocess.run", side_effect=subprocess.TimeoutExpired('codex', 1))
+    def test_timeout_is_reported(self, run):
+        with self.assertRaisesRegex(LlmError, '超时'):
+            CodexClient().complete([])
+
+    @patch("blogpost.llm.codex.subprocess.run")
+    def test_empty_response_is_an_error(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, stdout='  ', stderr='')
+        with self.assertRaises(LlmError):
+            CodexClient().complete([])
+
+
+class CodexConfigTests(unittest.TestCase):
+    def test_codex_does_not_require_api_configuration_and_round_trips(self):
+        from blogpost.config import AppConfig
+        cfg = AppConfig(provider='codex', api_base_url='', model='')
+        cfg.validate_for_run()
+        self.assertEqual(AppConfig.from_json_dict(cfg.to_json_dict()).provider, 'codex')
+
+    def test_unknown_provider_is_rejected(self):
+        from blogpost.config import AppConfig, ConfigError
+        with self.assertRaises(ConfigError):
+            AppConfig(provider='unknown').validate_for_run()
+
+    @patch('blogpost.application.PublishingPipeline')
+    @patch('blogpost.application.app_data_dir')
+    def test_pipeline_selects_codex_without_reading_api_key(self, data_dir, pipeline):
+        from pathlib import Path
+        from blogpost.application import ApplicationContext
+        from blogpost.config import AppConfig
+
+        data_dir.return_value = Path('.')
+        cfg = AppConfig(provider='codex')
+        account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time,
+                                  category='', profile_url='', article_type='', content_directions='', keywords='',
+                                  secondary_category='', personal_category='')
+        repository = Mock()
+        repository.get_account.return_value = account
+        secrets = Mock()
+        context = ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock())
+        context.build_pipeline()
+        secrets.get_api_key.assert_not_called()
+        self.assertIsInstance(pipeline.call_args.args[3].client, CodexClient)

@@ -34,6 +34,7 @@ class AppConfig:
     schedule_time: time = time(10, 0)
     api_base_url: str = DEFAULT_API_BASE_URL
     model: str = DEFAULT_MODEL
+    provider: str = "api"
     category: str = "AI 智能体"
     profile_url: str = ""
     dry_run: bool = True
@@ -54,10 +55,13 @@ class AppConfig:
             raise ConfigError("invalid schedule time")
 
     def validate_for_run(self) -> None:
-        if not self.model.strip():
-            raise ConfigError("model is required")
-        if not self.api_base_url.strip():
-            raise ConfigError("API base URL is required")
+        if self.provider not in {"api", "codex"}:
+            raise ConfigError("invalid model provider")
+        if self.provider == "api":
+            if not self.model.strip():
+                raise ConfigError("model is required")
+            if not self.api_base_url.strip():
+                raise ConfigError("API base URL is required")
         if self.min_chinese_chars < 401:
             raise ConfigError("minimum article length must exceed 400")
         if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
