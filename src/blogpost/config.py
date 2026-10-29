@@ -17,6 +17,16 @@ LEGACY_API_BASE_URL = "https://api.deepseek.com/v1"
 LEGACY_MODEL = "deepseek-chat"
 
 
+@dataclass(slots=True)
+class ModelConnection:
+    id: str
+    name: str
+    kind: str
+    vendor: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -35,6 +45,8 @@ class AppConfig:
     api_base_url: str = DEFAULT_API_BASE_URL
     model: str = DEFAULT_MODEL
     provider: str = "api"
+    connections: list[ModelConnection] = field(default_factory=list)
+    active_connection_id: str = ""
     category: str = "AI 智能体"
     profile_url: str = ""
     dry_run: bool = True
@@ -55,6 +67,20 @@ class AppConfig:
             raise ConfigError("invalid schedule time")
 
     def validate_for_run(self) -> None:
+        if self.connections:
+            connection = self.current_connection()
+            if connection.kind not in {"api", "codex"}:
+                raise ConfigError("invalid model provider")
+            if connection.kind == "api" and (not connection.model.strip() or not connection.base_url.strip()):
+                raise ConfigError("API base URL and model are required")
+        else:
+            self._validate_legacy_model()
+        if self.min_chinese_chars < 401:
+            raise ConfigError("minimum article length must exceed 400")
+        if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
+            raise ConfigError("51CTO profile URL must look like https://blog.51cto.com/u_123456")
+
+    def _validate_legacy_model(self) -> None:
         if self.provider not in {"api", "codex"}:
             raise ConfigError("invalid model provider")
         if self.provider == "api":
@@ -62,10 +88,23 @@ class AppConfig:
                 raise ConfigError("model is required")
             if not self.api_base_url.strip():
                 raise ConfigError("API base URL is required")
-        if self.min_chinese_chars < 401:
-            raise ConfigError("minimum article length must exceed 400")
-        if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
-            raise ConfigError("51CTO profile URL must look like https://blog.51cto.com/u_123456")
+
+    def current_connection(self) -> ModelConnection:
+        for connection in self.connections:
+            if connection.id == self.active_connection_id:
+                return connection
+        raise ConfigError("active model connection not found")
+
+    def ensure_connections(self) -> None:
+        if self.connections:
+            return
+        if self.provider not in {"api", "codex"}:
+            raise ConfigError("invalid model provider")
+        self.connections = [
+            ModelConnection("legacy-api", "DeepSeek" if "deepseek.com" in self.api_base_url else "API 服务", "api", "DeepSeek" if "deepseek.com" in self.api_base_url else "自定义", self.api_base_url, self.model),
+            ModelConnection("codex", "Codex CLI", "codex"),
+        ]
+        self.active_connection_id = "codex" if self.provider == "codex" else "legacy-api"
 
     def to_json_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -89,7 +128,12 @@ class AppConfig:
         if "schedule_time" in values and isinstance(values["schedule_time"], str):
             hour, minute = values["schedule_time"].split(":", 1)
             values["schedule_time"] = time(int(hour), int(minute))
-        return cls(**values)
+        if "connections" in values:
+            values["connections"] = [ModelConnection(**item) for item in values["connections"]]
+        cfg = cls(**values)
+        if "connections" not in values:
+            cfg.ensure_connections()
+        return cfg
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":

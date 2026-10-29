@@ -84,13 +84,15 @@ class ApplicationContext:
         if not account.enabled:
             raise ValueError(f"账号“{account.display_name}”已停用")
         config = self.config_for_account(account_id)
-        if config.provider == "codex":
+        connection = config.current_connection() if config.connections else None
+        provider = connection.kind if connection else config.provider
+        if provider == "codex":
             client = CodexClient()
-        elif config.provider == "api":
-            api_key = self.secrets.get_api_key()
+        elif provider == "api":
+            api_key = self.secrets.get_api_key(connection.id) if connection else self.secrets.get_api_key()
             if not api_key:
                 raise ValueError("请先在设置中填写大模型 API Key")
-            client = OpenAICompatibleClient(config.api_base_url, config.model, api_key)
+            client = OpenAICompatibleClient(connection.base_url if connection else config.api_base_url, connection.model if connection else config.model, api_key)
         else:
             raise ValueError("无效的大模型服务")
         return PublishingPipeline(

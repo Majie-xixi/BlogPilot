@@ -22,7 +22,7 @@ from blogpost.ui.account_dialog import (
     is_generic_account_name,
 )
 from blogpost.ui.help_dialog import HelpDialog
-from blogpost.ui.settings_dialog import SettingsDialog
+from blogpost.ui.model_settings_dialog import SettingsDialog
 from blogpost.ui.theme import COLORS, FONT
 from blogpost.ui.widgets import (
     NetworkStatusIcon,
