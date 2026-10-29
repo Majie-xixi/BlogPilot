@@ -12,6 +12,7 @@ from blogpost.browser.websocket import WebSocketError
 from blogpost.domain import Article, PublishResult, RunStatus
 from blogpost.publishers.diagnostics import save_diagnostic
 from blogpost.publishers.cto51_profile import ProfileSnapshot, fetch_profile_snapshot
+from blogpost.publishers.personal_categories import CategoryClient, CategoryError, ensure_personal_category
 
 
 PUBLISH_URL = "https://blog.51cto.com/blogger/publish"
@@ -241,6 +242,10 @@ class Cto51Publisher:
                     )
                 ) or {}
                 if not settings.get("personalOk"):
+                    try:
+                        ensure_personal_category(CategoryClient(self.chrome, session), self.personal_category)
+                    except CategoryError as exc:
+                        return self._diagnostic_failure(session, str(exc))
                     settings["personalOk"] = self._select_personal_category(
                         session,
                         self.personal_category,
@@ -264,10 +269,13 @@ class Cto51Publisher:
                         )
                         if not ok
                     ]
-                    return self._diagnostic_failure(
-                        session,
-                        f"51CTO 发布设置未完成：{'、'.join(missing)}",
-                    )
+                    reason = f"51CTO 发布设置未完成：{'、'.join(missing)}"
+                    if not settings.get("personalOk"):
+                        reason += (
+                            f"。请先在 51CTO 创建或确认个人分类“{self.personal_category}”，"
+                            "点击分类旁的“刷新”后重试；也可在软件账号管理中改为已有分类"
+                        )
+                    return self._diagnostic_failure(session, reason)
 
                 if dry_run:
                     return PublishResult(

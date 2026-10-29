@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -59,6 +60,51 @@ class Cto51ProfileTests(unittest.TestCase):
             parse_51cto_time("1小时前", now),
             datetime(2026, 7, 16, 9, 0),
         )
+
+    def test_explicit_empty_all_articles_means_no_publication(self):
+        html = (Path(__file__).parent / "fixtures" / "cto51_empty_profile.html").read_text(
+            encoding="utf-8"
+        )
+        now = datetime(2026, 7, 28, 10, 0)
+
+        snapshot = parse_profile_html(html, self.PROFILE_URL, now=now)
+
+        self.assertIs(snapshot.has_publication_on(now.date()), False)
+        self.assertEqual(snapshot.month_count, 0)
+        self.assertIsNone(snapshot.latest_published_at)
+
+    def test_unrecognized_or_unrelated_empty_content_remains_unknown(self):
+        html = (Path(__file__).parent / "fixtures" / "cto51_empty_profile.html").read_text(
+            encoding="utf-8"
+        )
+        cases = {
+            "unrecognized page": "<html><script>loadProfile()</script></html>",
+            "empty marker alone": '<div class="common-nodata">暂无内容</div>',
+            "script template only": f"<script>const template = `{html}`;</script>",
+            "commented markup only": f"<!--{html}-->",
+            "other section": html.replace("common-section-one", "common-section-two"),
+            "wrong account": html.replace("u_987654", "u_123456"),
+            "original filter": html.replace(
+                'href="/u_987654" class="cur"', 'href="/u_987654/original" class="cur"'
+            ),
+            "inactive all tab": html.replace('class="cur"', 'class="first"'),
+            "different empty message": html.replace("暂无内容", "加载失败"),
+            "empty marker outside section": html.replace(
+                '<div class="common-nodata">暂无内容</div>', ""
+            ).replace("</section>", '</section><div class="common-nodata">暂无内容</div>'),
+            "article list also present": html.replace(
+                '<div class="common-nodata">',
+                '<div id="common-article-listbox-1"><h3>文章时间未识别</h3></div>'
+                '<div class="common-nodata">',
+            ),
+        }
+        now = datetime(2026, 7, 28, 10, 0)
+        for name, content in cases.items():
+            with self.subTest(name=name):
+                snapshot = parse_profile_html(content, self.PROFILE_URL, now=now)
+
+                self.assertIsNone(snapshot.has_publication_on(now.date()))
+                self.assertIsNone(snapshot.month_count)
 
     @patch("blogpost.publishers.cto51_profile.time.sleep")
     @patch("blogpost.publishers.cto51_profile._download_profile_html")

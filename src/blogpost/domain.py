@@ -35,7 +35,12 @@ TERMINAL_STATES = {
 }
 
 _NEXT: dict[RunStatus, set[RunStatus]] = {
-    RunStatus.QUEUED: {RunStatus.PLANNING, RunStatus.SKIPPED, RunStatus.FAILED},
+    RunStatus.QUEUED: {
+        RunStatus.PLANNING,
+        RunStatus.SKIPPED,
+        RunStatus.FAILED,
+        RunStatus.UNKNOWN,
+    },
     RunStatus.PLANNING: {RunStatus.GENERATING, RunStatus.FAILED},
     RunStatus.GENERATING: {RunStatus.VALIDATING, RunStatus.FAILED},
     RunStatus.VALIDATING: {

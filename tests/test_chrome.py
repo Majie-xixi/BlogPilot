@@ -125,6 +125,7 @@ class ChromeTests(unittest.TestCase):
                 default_port=9229,
             )
             with (
+                patch.object(controller, "_find_running_profile_port", return_value=None),
                 patch.object(controller, "find_available_port", return_value=9230),
                 patch("blogpost.browser.chrome.subprocess.Popen") as popen,
                 patch.object(controller, "version", return_value={"Browser": "Chrome"}),

@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import time
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -25,10 +26,11 @@ class ProfileSnapshot:
     latest_title: str | None
     latest_url: str | None
     display_name: str | None = None
+    articles_empty: bool = False
 
     def has_publication_on(self, day: date) -> bool | None:
         if self.latest_published_at is None:
-            return None
+            return False if self.articles_empty else None
         return self.latest_published_at.date() == day
 
 
@@ -116,14 +118,50 @@ def parse_profile_html(
     )
     month_match = month_pattern.search(html, year_anchor.end() if year_anchor else 0)
 
+    articles_empty = False
+    page_markup = re.sub(
+        r"<!--.*?-->|<(script|style)\b[^>]*>.*?</\1\s*>",
+        "",
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    section = re.search(
+        r'<section\b[^>]*\sid=["\']common-section-one["\'][^>]*>(?P<body>.*?)</section\s*>',
+        page_markup,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if section and article_box is None:
+        body = section.group("body")
+        empty_marker = re.search(
+            r'<div\b[^>]*\sclass=["\']common-nodata["\'][^>]*>\s*暂无内容\s*</div\s*>\s*$',
+            body,
+            re.IGNORECASE,
+        )
+        if empty_marker:
+            profile_links = {profile_url.rstrip("/"), urlsplit(profile_url).path.rstrip("/")}
+            for tag in re.findall(r"<a\b[^>]*>\s*全部\s*</a\s*>", body, re.IGNORECASE):
+                attributes = {
+                    key.lower(): unescape(value)
+                    for key, _quote, value in re.findall(
+                        r"""([:\w-]+)\s*=\s*(["'])(.*?)\2""", tag, re.DOTALL
+                    )
+                }
+                if (
+                    "cur" in attributes.get("class", "").split()
+                    and attributes.get("href", "").rstrip("/") in profile_links
+                ):
+                    articles_empty = True
+                    break
+
     return ProfileSnapshot(
         profile_url=profile_url.rstrip("/"),
         checked_at=checked_at,
         latest_published_at=parse_51cto_time(latest_text, checked_at) if latest_text else None,
-        month_count=int(month_match.group(1)) if month_match else None,
+        month_count=0 if articles_empty else int(month_match.group(1)) if month_match else None,
         latest_title=latest_title,
         latest_url=latest_url,
         display_name=parse_profile_display_name(html),
+        articles_empty=articles_empty,
     )
 
 
