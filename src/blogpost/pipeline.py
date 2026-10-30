@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import date
 import json
 import logging
+import threading
 
 from blogpost.article_store import ArticleStore
 from blogpost.config import AppConfig
@@ -17,6 +18,7 @@ from blogpost.domain import (
     Trigger,
 )
 from blogpost.markdown import normalize_single_h1, parse_markdown
+from blogpost.logging_setup import redact
 from blogpost.repositories import Repository
 from blogpost.run_lock import AlreadyRunning, RunLock
 from blogpost.style import summarize_style
@@ -24,6 +26,39 @@ from blogpost.style import summarize_style
 
 logger = logging.getLogger(__name__)
 Progress = Callable[[RunStatus, str], None]
+
+
+class Cancelled(Exception):
+    pass
+
+
+class Cancellation:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self._publishing = False
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._publishing:
+                return False
+            self._cancelled = True
+            return True
+
+    def check(self) -> None:
+        with self._lock:
+            if self._cancelled:
+                raise Cancelled()
+
+    def begin_publish(self) -> None:
+        with self._lock:
+            if self._cancelled:
+                raise Cancelled()
+            self._publishing = True
+
+    def end_publish(self) -> None:
+        with self._lock:
+            self._publishing = False
 
 
 class PublishingPipeline:
@@ -61,9 +96,11 @@ class PublishingPipeline:
         *,
         allow_same_day: bool = False,
         progress: Progress | None = None,
+        cancellation: Cancellation | None = None,
     ) -> PublishResult:
         self.config.validate_for_run()
         callback = progress or (lambda status, message: None)
+        cancellation = cancellation or Cancellation()
 
         def emit(status: RunStatus, message: str) -> None:
             logger.info(
@@ -107,6 +144,7 @@ class PublishingPipeline:
                     emit(RunStatus.SKIPPED, message)
                     return PublishResult(RunStatus.SKIPPED, message=message)
                 try:
+                    cancellation.check()
                     corpus = self.corpus_indexer.scan_history() + self.corpus_indexer.scan_generated()
                     self.repository.update_run(run.id, RunStatus.PLANNING)
                     emit(RunStatus.PLANNING, "正在选择未重复的 AI 技术主题")
@@ -115,6 +153,7 @@ class PublishingPipeline:
                         self.config.title_similarity_threshold,
                         self.config.content_similarity_threshold,
                     )
+                    cancellation.check()
 
                     self.repository.update_run(run.id, RunStatus.GENERATING)
                     emit(RunStatus.GENERATING, f"正在生成：{topic.title}")
@@ -123,11 +162,13 @@ class PublishingPipeline:
                         topic.summary,
                         summarize_style(corpus),
                     )
+                    cancellation.check()
 
                     self.repository.update_run(run.id, RunStatus.VALIDATING)
                     emit(RunStatus.VALIDATING, "正在执行原创性与质量检查")
                     deterministic = self.quality_gate.check(article.markdown, corpus)
                     model_report = self.reviewer.review(article.markdown) if deterministic.passed else deterministic
+                    cancellation.check()
                     if not deterministic.passed or not model_report.passed:
                         feedback = self._feedback(deterministic, model_report)
                         emit(RunStatus.VALIDATING, f"首次检查未通过，正在按反馈重写：{feedback}")
@@ -139,6 +180,7 @@ class PublishingPipeline:
                         article = Article(parsed.title, rewritten, topic.title)
                         deterministic = self.quality_gate.check(article.markdown, corpus)
                         model_report = self.reviewer.review(article.markdown) if deterministic.passed else deterministic
+                        cancellation.check()
                     if not deterministic.passed or not model_report.passed:
                         feedback = self._feedback(deterministic, model_report)
                         self.repository.update_run(run.id, RunStatus.SAVING)
@@ -198,31 +240,41 @@ class PublishingPipeline:
                         account_id=self.account_id,
                     )
 
-                    self.repository.update_run(run.id, RunStatus.PUBLISHING, article_id=article_id)
-                    emit(RunStatus.PUBLISHING, "正在填充 51CTO 编辑器")
-                    result = self.publisher.publish(article, self.config.category, self.config.dry_run)
-                    if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
-                        self.repository.update_run(
-                            run.id,
+                    cancellation.begin_publish()
+                    try:
+                        self.repository.update_run(run.id, RunStatus.PUBLISHING, article_id=article_id)
+                        emit(RunStatus.PUBLISHING, "正在填充 51CTO 编辑器")
+                        result = self.publisher.publish(article, self.config.category, self.config.dry_run)
+                        if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
+                            self.repository.update_run(
+                                run.id,
+                                result.status,
+                                article_id=article_id,
+                                error_code=None if result.status == RunStatus.PUBLISHED else "publish_failed",
+                                error_summary=result.message,
+                            )
+                        else:
+                            self.repository.force_run_status(run.id, result.status)
+                        emit(result.status, result.message or result.url or result.status.value)
+                        return PublishResult(
                             result.status,
-                            article_id=article_id,
-                            error_code=None if result.status == RunStatus.PUBLISHED else "publish_failed",
-                            error_summary=result.message,
+                            url=result.url,
+                            message=result.message,
+                            article_path=str(stored.path),
                         )
-                    else:
-                        self.repository.force_run_status(run.id, result.status)
-                    emit(result.status, result.message or result.url or result.status.value)
-                    return PublishResult(
-                        result.status,
-                        url=result.url,
-                        message=result.message,
-                        article_path=str(stored.path),
-                    )
+                    finally:
+                        cancellation.end_publish()
+                except Cancelled:
+                    self.repository.force_run_status(run.id, RunStatus.SKIPPED)
+                    message = "已取消，未进入发布步骤；已保存的文章会保留"
+                    emit(RunStatus.SKIPPED, message)
+                    return PublishResult(RunStatus.SKIPPED, message=message)
                 except Exception as exc:
-                    logger.exception("pipeline failed run_id=%s", run.id)
+                    detail = redact(str(exc))
+                    logger.error("pipeline failed run_id=%s error_type=%s message=%s", run.id, type(exc).__name__, detail)
                     self.repository.force_run_status(run.id, RunStatus.FAILED)
-                    emit(RunStatus.FAILED, str(exc))
-                    return PublishResult(RunStatus.FAILED, message=str(exc))
+                    emit(RunStatus.FAILED, detail)
+                    return PublishResult(RunStatus.FAILED, message=detail)
         except AlreadyRunning as exc:
             return PublishResult(RunStatus.SKIPPED, message=str(exc))
 

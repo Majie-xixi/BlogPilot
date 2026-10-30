@@ -15,7 +15,9 @@ import webbrowser
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
 from blogpost.network import internet_connection_status
-from blogpost.paths import config_path
+from blogpost.logging_setup import redact
+from blogpost.paths import config_path, log_path
+from blogpost.pipeline import Cancellation
 from blogpost.publishers.cto51_profile import ProfileSnapshot
 from blogpost.ui.account_dialog import (
     AccountManagerDialog,
@@ -24,6 +26,7 @@ from blogpost.ui.account_dialog import (
 )
 from blogpost.ui.help_dialog import HelpDialog
 from blogpost.ui.model_settings_dialog import SettingsDialog
+from blogpost.ui.settings_dialog import place_dialog
 from blogpost.ui.theme import COLORS, FONT
 from blogpost.ui.widgets import (
     NetworkStatusIcon,
@@ -66,6 +69,10 @@ TRIGGER_TEXT = {
     Trigger.SCHEDULED: "定时",
     Trigger.SYNCED: "线上同步",
 }
+
+
+def format_service_status(model: str, profile: str) -> str:
+    return f"模型服务：{model} · 51CTO：{profile}"
 
 
 def format_schedule_status(status: str, time_text: str) -> tuple[str, str]:
@@ -163,10 +170,14 @@ class MainWindow:
         self.context = context
         self.queue: Queue[tuple] = Queue()
         self.running = False
+        self.cancellation: Cancellation | None = None
+        self.stage_started = time.monotonic()
         self.profile_snapshot: ProfileSnapshot | None = None
         self.status_refreshing = False
         self.status_refresh_generation = 0
         self.network_status: bool | None = None
+        self.model_service_status = "未检测"
+        self.profile_service_status = "未检查"
         self.account_map: dict[str, Account] = {}
         self.current_account_id = DEFAULT_ACCOUNT_ID
         self.account_popup: tk.Toplevel | None = None
@@ -198,6 +209,8 @@ class MainWindow:
             text="每天生成一篇原创 AI 技术文章，并自动发布到 51CTO",
             style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.service_status_var = tk.StringVar(value=format_service_status('未检测', '未检查'))
+        ttk.Label(title_block, textvariable=self.service_status_var, style="Subtitle.TLabel").grid(row=2, column=0, sticky="w", pady=(4, 0))
         account_controls = ttk.Frame(header, style="Page.TFrame")
         account_controls.grid(row=0, column=1, rowspan=2, sticky="e")
         self.account_var = tk.StringVar()
@@ -296,6 +309,8 @@ class MainWindow:
             outer=COLORS["surface"],
         )
         self.run_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.cancel_button = RoundedButton(hero_actions, text="停止后续步骤", command=self.cancel_run,
+                                           variant="secondary", height=36, outer=COLORS["surface"])
         self.progress_frame = ttk.Frame(hero, style="Surface.TFrame")
         self.progress_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         self.progress_frame.columnconfigure(0, weight=1)
@@ -377,6 +392,8 @@ class MainWindow:
             outer=COLORS["page"],
         )
         self.detail_toggle_button.grid(row=0, column=2, sticky="e", padx=(0, 8))
+        RoundedButton(section, text="查看详细日志", variant="link", height=28,
+                      command=self.open_detailed_log, outer=COLORS["page"]).grid(row=0, column=3, sticky="e", padx=(0, 8))
         self.clear_log_button = RoundedButton(
             section,
             text="清空日志",
@@ -385,7 +402,7 @@ class MainWindow:
             command=self._clear_log_and_show_empty,
             outer=COLORS["page"],
         )
-        self.clear_log_button.grid(row=0, column=3, sticky="e")
+        self.clear_log_button.grid(row=0, column=4, sticky="e")
 
         detail_stack = ttk.Frame(page, style="Page.TFrame")
         detail_stack.grid(row=5, column=0, sticky="nsew")
@@ -517,6 +534,8 @@ class MainWindow:
         if account_id not in self.account_map:
             return
         self.current_account_id = account_id
+        self.profile_service_status = '未检查'
+        self._update_service_status()
         self._show_account_name(self.account_map[account_id])
         self._close_account_popup()
         self.status_refresh_generation += 1
@@ -585,6 +604,8 @@ class MainWindow:
     def _account_saved(self, account_id: str) -> None:
         self._reload_accounts(account_id)
         self.profile_snapshot = None
+        self.profile_service_status = '未检查'
+        self._update_service_status()
         self.refresh()
 
     def refresh(self) -> None:
@@ -739,6 +760,9 @@ class MainWindow:
         if generation != self.status_refresh_generation or account_id != self.current_account_id:
             return
         self.status_refreshing = False
+        if hasattr(self, 'service_status_var'):
+            self.profile_service_status = '已响应' if snapshot is not None else ('检查失败' if profile_error else '未检查')
+            self._update_service_status()
         self.network_status = True if snapshot is not None else network_status
         self.network_icon.set_status(self.network_status)
         if profile_url == self.current_account.profile_url.rstrip("/"):
@@ -796,6 +820,7 @@ class MainWindow:
         timestamp: bool = True,
         time_text: str | None = None,
     ) -> None:
+        message = redact(message)
         self.log_text.configure(state="normal")
         if timestamp:
             level = tag if tag in {"success", "warning", "error"} else "info"
@@ -843,12 +868,12 @@ class MainWindow:
         self._show_empty_log()
 
     def _show_progress(self, title: str, message: str, percent: int) -> None:
-        value = max(0, min(100, int(percent)))
+        self.stage_started = time.monotonic()
         self.hero_title_var.set(title)
         self.progress_var.set(message)
         self.progress_step_var.set(message)
-        self.progress_pct_var.set(f"{value}%")
-        self.progressbar.configure(mode="determinate", maximum=100, value=value)
+        self.progress_pct_var.set("已等待 0 秒")
+        self.progressbar.grid_remove()
         self.progress_frame.grid()
 
     def _update_stage_progress(self, status: RunStatus, message: str) -> None:
@@ -860,9 +885,8 @@ class MainWindow:
         )
 
     def _complete_progress(self, message: str) -> None:
-        self.progressbar.configure(mode="determinate", maximum=100, value=100)
         self.progress_step_var.set(message)
-        self.progress_pct_var.set("100%")
+        self.progress_pct_var.set("已结束")
 
     def _reset_progress_if_idle(self) -> None:
         if self.running:
@@ -894,22 +918,42 @@ class MainWindow:
             self._show_log_view()
 
     def open_settings(self) -> None:
-        SettingsDialog(self.root, self.context, self.refresh)
+        SettingsDialog(self.root, self.context, self._settings_saved, self._model_tested)
+
+    def open_detailed_log(self) -> None:
+        path = log_path()
+        if path.exists():
+            os.startfile(path)
+        else:
+            messagebox.showinfo("详细日志", "尚未生成日志文件。", parent=self.root)
+
+    def _settings_saved(self) -> None:
+        self.model_service_status = '未检测'
+        self._update_service_status()
+        self.refresh()
+
+    def _model_tested(self, connection_id: str, succeeded: bool) -> None:
+        if connection_id == self.context.config.active_connection_id:
+            self.model_service_status = '测试成功' if succeeded else '测试失败'
+            self._update_service_status()
+
+    def _update_service_status(self) -> None:
+        self.service_status_var.set(format_service_status(self.model_service_status, self.profile_service_status))
 
     def toggle_dry_run(self) -> None:
         if self.running:
-            messagebox.showinfo("任务运行中", "请等待当前任务结束后再切换发布模式。")
+            messagebox.showinfo("任务运行中", "请等待当前任务结束后再切换发布模式。", parent=self.root)
             return
         current = self.context.config
         if current.dry_run and not messagebox.askyesno(
-            "切换为真实发布", "关闭安全试运行后，所有账号的后续手动及定时任务可能自动发布到 51CTO。是否继续？"
+            "切换为真实发布", "关闭安全试运行后，所有账号的后续手动及定时任务可能自动发布到 51CTO。是否继续？", parent=self.root
         ):
             return
         updated = replace(current, dry_run=not current.dry_run)
         try:
             updated.save(config_path())
         except Exception as exc:
-            messagebox.showerror("切换失败", f"发布模式未更改：{exc}")
+            messagebox.showerror("切换失败", f"发布模式未更改：{exc}", parent=self.root)
             return
         self.context.config = updated
         self.refresh()
@@ -943,15 +987,18 @@ class MainWindow:
         if self.context.repository.has_successful_publication(
             date.today(), self.current_account_id
         ) or online_published is True:
-            allow = messagebox.askyesno("今天已经发布", "今天已有成功发布记录，仍要再生成并发布一篇吗？")
+            allow = messagebox.askyesno("今天已经发布", "今天已有成功发布记录，仍要再生成并发布一篇吗？", parent=self.root)
             if not allow:
                 return
         try:
             pipeline = self.context.build_pipeline(self.current_account_id)
         except Exception as exc:
-            messagebox.showerror("无法开始", str(exc))
+            messagebox.showerror("无法开始", str(exc), parent=self.root)
             return
         self.running = True
+        self.cancellation = Cancellation()
+        self.cancel_button.grid(row=1, column=1, sticky="e", pady=(6, 0))
+        self.cancel_button.configure(state="normal", text="停止后续步骤")
         self._clear_log()
         self._append_log("任务已启动，正在准备历史语料和选题。")
         self._show_log_view()
@@ -971,11 +1018,12 @@ class MainWindow:
         path_text = self.context.repository.latest_article_path(account_id)
         path = Path(path_text) if path_text else None
         if path is None or not path.exists():
-            messagebox.showinfo("暂无文章", "没有找到可重新发布的已保存文章。")
+            messagebox.showinfo("暂无文章", "没有找到可重新发布的已保存文章。", parent=self.root)
             return
         if not messagebox.askyesno(
             "重新发布最近文章",
             f"将直接发布下面这篇文章，不会调用大模型重新生成：\n\n{path.name}\n\n是否继续？",
+            parent=self.root,
         ):
             return
         self.running = True
@@ -1002,10 +1050,12 @@ class MainWindow:
 
     def _run_worker(self, pipeline, allow: bool) -> None:
         try:
+            options = {"cancellation": self.cancellation} if getattr(self, 'cancellation', None) else {}
             result = pipeline.run(
                 Trigger.MANUAL,
                 allow_same_day=allow,
                 progress=lambda status, message: self.queue.put(("progress", status, message)),
+                **options,
             )
         except Exception as exc:
             result = PublishResult(RunStatus.FAILED, message=str(exc))
@@ -1016,12 +1066,15 @@ class MainWindow:
             return
         accounts = self.context.accounts(enabled_only=True)
         if not accounts:
-            messagebox.showinfo("没有启用账号", "请先在账号管理中启用至少一个账号。")
+            messagebox.showinfo("没有启用账号", "请先在账号管理中启用至少一个账号。", parent=self.root)
             return
         BatchPublishDialog(self.root, accounts, self._start_batch)
 
     def _start_batch(self, account_ids: list[str]) -> None:
         self.running = True
+        self.cancellation = Cancellation()
+        self.cancel_button.grid(row=1, column=1, sticky="e", pady=(6, 0))
+        self.cancel_button.configure(state="normal", text="停止后续步骤")
         self._clear_log()
         self._show_log_view()
         accounts = {
@@ -1046,14 +1099,18 @@ class MainWindow:
         threading.Thread(target=self._batch_worker, args=(account_ids,), daemon=True).start()
 
     def _batch_worker(self, account_ids: list[str]) -> None:
-        results = self.context.run_accounts(
-            account_ids,
-            Trigger.MANUAL,
-            progress=lambda account, status, message: self.queue.put(
-                ("batch_progress", account.display_name, status, message)
-            ),
-        )
-        self.queue.put(("batch_done", results))
+        try:
+            results = self.context.run_accounts(
+                account_ids,
+                Trigger.MANUAL,
+                progress=lambda account, status, message: self.queue.put(
+                    ("batch_progress", account.display_name, status, message)
+                ),
+                cancellation=self.cancellation,
+            )
+            self.queue.put(("batch_done", results))
+        except Exception as exc:
+            self.queue.put(("done", PublishResult(RunStatus.FAILED, message=redact(str(exc)))))
 
     def _drain_queue(self) -> None:
         try:
@@ -1061,6 +1118,9 @@ class MainWindow:
                 event = self.queue.get_nowait()
                 if event[0] == "progress":
                     _, status, message = event
+                    if status == RunStatus.GENERATING and hasattr(self, 'service_status_var'):
+                        self.model_service_status = '已响应'
+                        self._update_service_status()
                     self._update_stage_progress(status, message)
                     tag = "error" if status == RunStatus.FAILED else "warning" if status in {RunStatus.NEEDS_REVIEW, RunStatus.UNKNOWN} else "success" if status == RunStatus.PUBLISHED else "info"
                     self._append_log(f"{STATUS_TEXT.get(status, status.value)}：{message}", tag)
@@ -1091,21 +1151,38 @@ class MainWindow:
                     self._apply_login_profile(*event[1:])
         except Empty:
             pass
+        if self.running and hasattr(self, 'stage_started'):
+            elapsed = max(0, int(time.monotonic() - self.stage_started))
+            self.progress_pct_var.set(f"已等待 {elapsed} 秒")
         self.root.after(150, self._drain_queue)
+
+    def cancel_run(self) -> None:
+        if not self.running or self.cancellation is None:
+            return
+        if self.cancellation.cancel():
+            self.cancel_button.configure(state="disabled", text="等待当前步骤结束")
+            self.progress_var.set("已请求停止 · 等待当前步骤结束")
+            self._append_log("已请求停止：等待当前步骤结束后停止后续处理，不会中断正在进行的模型请求。", "warning")
+        else:
+            self._append_log("已进入发布步骤，无法安全取消；请等待结果并核对 51CTO。", "warning")
 
     def _finish_run(self, result) -> None:
         self.running = False
+        if getattr(self, 'cancellation', None) is not None:
+            self.cancel_button.grid_remove()
+            self.cancellation = None
         self.run_button.configure(state="normal")
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
         self.hero_title_var.set("任务已结束")
         self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
         self._complete_progress(self.progress_var.get())
+        self._append_log(self.progress_var.get(), "error" if result.status == RunStatus.FAILED else "warning" if result.status in {RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW, RunStatus.SKIPPED} else "success")
         self.refresh()
         if result.status == RunStatus.PUBLISHED:
             self._show_publish_success(result.url)
         elif result.status == RunStatus.NEEDS_REVIEW and result.article_path:
-            if messagebox.askyesno("文章需要检查", f"{result.message}\n\n草稿已经保存，是否立即打开？"):
+            if messagebox.askyesno("文章需要检查", f"{result.message}\n\n草稿已经保存，是否立即打开？", parent=self.root):
                 os.startfile(result.article_path)
         elif result.status in {RunStatus.FAILED, RunStatus.UNKNOWN}:
             self._show_task_failure(
@@ -1113,10 +1190,12 @@ class MainWindow:
                 uncertain=result.status == RunStatus.UNKNOWN,
             )
         elif result.status == RunStatus.SKIPPED and result.article_path:
-            messagebox.showinfo("安全试运行完成", f"文章已保存：\n{result.article_path}")
+            messagebox.showinfo("安全试运行完成", f"文章已保存：\n{result.article_path}", parent=self.root)
 
     def _finish_batch(self, results: list[tuple[Account, PublishResult]]) -> None:
         self.running = False
+        self.cancel_button.grid_remove()
+        self.cancellation = None
         self.run_button.configure(state="normal")
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
@@ -1127,6 +1206,7 @@ class MainWindow:
         self.hero_title_var.set("批量任务已结束")
         self.progress_var.set(f"批量任务完成 · 成功 {success} · 失败/待处理 {failed} · 跳过 {skipped}")
         self._complete_progress(self.progress_var.get())
+        self._append_log(self.progress_var.get(), "warning" if failed or skipped else "success")
         self.refresh()
         self._show_batch_summary(results)
 
@@ -1167,9 +1247,7 @@ class MainWindow:
         )
         dialog.update_idletasks()
         width, height = 520, max(300, 205 + len(results) * 58)
-        x = self.root.winfo_rootx() + max(10, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(10, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        place_dialog(dialog, self.root, (width, height))
         dialog.grab_set()
         dialog.focus_force()
 
@@ -1232,9 +1310,7 @@ class MainWindow:
 
         dialog.update_idletasks()
         width, height = 440, 270
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        place_dialog(dialog, self.root, (width, height))
         dialog.grab_set()
         dialog.focus_force()
 
@@ -1290,9 +1366,7 @@ class MainWindow:
 
         dialog.update_idletasks()
         width, height = 500, 330
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        place_dialog(dialog, self.root, (width, height))
         dialog.grab_set()
         dialog.focus_force()
 
@@ -1308,7 +1382,7 @@ class MainWindow:
             self.progress_var.set(f"已打开 {self.current_account.display_name} 的独立登录窗口")
             self._append_log(f"已打开 {self.current_account.display_name} 的 51CTO 登录窗口。")
         except Exception as exc:
-            messagebox.showerror("无法打开自动发布登录窗口", str(exc))
+            messagebox.showerror("无法打开自动发布登录窗口", str(exc), parent=self.root)
 
     def _start_login_profile_sync(self) -> None:
         self.login_sync_generation += 1
@@ -1395,16 +1469,16 @@ class MainWindow:
             self.context.scheduler.install([account.schedule_time for account in accounts])
             self._start_runtime_status_refresh(force=True)
             details = "、".join(f"{account.display_name} {account.schedule_time:%H:%M}" for account in accounts)
-            messagebox.showinfo("定时任务", f"已更新多账号自动计划：\n{details}")
+            messagebox.showinfo("定时任务", f"已更新多账号自动计划：\n{details}", parent=self.root)
         except Exception as exc:
-            messagebox.showerror("定时任务安装失败", str(exc))
+            messagebox.showerror("定时任务安装失败", str(exc), parent=self.root)
 
     def open_latest_article(self) -> None:
         path = self.context.repository.latest_article_path(self.current_account_id)
         if path and Path(path).exists():
             os.startfile(path)
         else:
-            messagebox.showinfo("暂无文章", "还没有可打开的已保存文章。")
+            messagebox.showinfo("暂无文章", "还没有可打开的已保存文章。", parent=self.root)
 
     def open_generated_dir(self) -> None:
         path = self.context.config_for_account(self.current_account_id).generated_dir

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from ctypes import Structure, byref, c_long, windll
 from dataclasses import dataclass
-import sys
 import tkinter as tk
 from tkinter import ttk
 
-from blogpost.ui.settings_dialog import fit_dialog_geometry
+from blogpost.ui.settings_dialog import place_dialog
 from blogpost.ui.theme import COLORS, FONT
 from blogpost.ui.widgets import RoundedButton, RoundedPanel
 
@@ -48,7 +46,7 @@ HELP_STEPS = (
     HelpStep(
         "05",
         "先试运行，再真实发布",
-        "点击“立即生成并发布”完成第一次安全试运行。确认文章、分类和编辑器内容无误后，可在首页“发布模式”切换并确认真实发布；该设置影响所有账号的后续任务。",
+        "点击“立即生成并发布”完成第一次安全试运行。运行中可请求停止后续步骤，当前调用结束后生效；进入发布步骤后请等待结果。确认文章、分类和编辑器内容无误后，可在首页“发布模式”切换并确认真实发布；该设置影响所有账号的后续任务。",
     ),
     HelpStep(
         "06",
@@ -68,10 +66,6 @@ BUTTON_GUIDE = (
     ButtonGuideItem("打开文章目录", "查看当前账号生成文章所在的本地目录。"),
     ButtonGuideItem("重新发布最近文章", "重发已保存文章，不重新生成，也不再次消耗大模型额度。"),
 )
-
-
-class _Rect(Structure):
-    _fields_ = (("left", c_long), ("top", c_long), ("right", c_long), ("bottom", c_long))
 
 
 class HelpDialog(tk.Toplevel):
@@ -281,24 +275,6 @@ class HelpDialog(tk.Toplevel):
         if self.canvas.bbox("all") and self.scroll_content.winfo_reqheight() > self.canvas.winfo_height():
             self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
 
-    def _work_area(self) -> tuple[int, int, int, int]:
-        if sys.platform == "win32":
-            rect = _Rect()
-            if windll.user32.SystemParametersInfoW(0x0030, 0, byref(rect), 0):
-                return rect.left, rect.top, rect.right, rect.bottom
-        return 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
-
     def _place_in_work_area(self) -> None:
-        parent = (
-            self.master.winfo_rootx(),
-            self.master.winfo_rooty(),
-            self.master.winfo_width(),
-            self.master.winfo_height(),
-        )
-        width, height, x, y = fit_dialog_geometry(
-            parent,
-            self._work_area(),
-            preferred=(720, 760),
-        )
+        width, height, _, _ = place_dialog(self, self.master, (720, 760))
         self.minsize(min(620, width), min(480, height))
-        self.geometry(f"{width}x{height}+{x}+{y}")

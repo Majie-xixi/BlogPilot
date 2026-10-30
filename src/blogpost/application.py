@@ -18,7 +18,7 @@ from blogpost.llm.codex import CodexClient
 from blogpost.llm.generation import ArticleGenerator, ArticleRewriter, TopicPlanner
 from blogpost.llm.review import ModelReviewer
 from blogpost.paths import app_data_dir, browser_profile_dir, config_path, database_path
-from blogpost.pipeline import PublishingPipeline
+from blogpost.pipeline import Cancelled, Cancellation, PublishingPipeline
 from blogpost.publishers.cto51 import Cto51Publisher
 from blogpost.quality import QualityGate
 from blogpost.repositories import Repository
@@ -127,6 +127,7 @@ class ApplicationContext:
         allow_same_day: bool = False,
         due_only: bool = False,
         progress: AccountProgress | None = None,
+        cancellation: Cancellation | None = None,
     ) -> list[tuple[Account, PublishResult]]:
         selected = set(account_ids or [])
         now = datetime.now()
@@ -165,15 +166,25 @@ class ApplicationContext:
 
         results: list[tuple[Account, PublishResult]] = []
         for account in accounts:
+            if cancellation is not None:
+                try:
+                    cancellation.check()
+                except Cancelled:
+                    result = PublishResult(RunStatus.SKIPPED, message="已取消，未开始处理此账号")
+                    callback(account, result.status, result.message)
+                    results.append((account, result))
+                    continue
             callback(account, RunStatus.QUEUED, f"开始处理账号：{account.display_name}")
             try:
                 pipeline = self.build_pipeline(account.id)
+                options = {"cancellation": cancellation} if cancellation is not None else {}
                 result = pipeline.run(
                     trigger,
                     allow_same_day=allow_same_day,
                     progress=lambda status, message, current=account: callback(
                         current, status, message
                     ),
+                    **options,
                 )
             except Exception as exc:
                 result = PublishResult(RunStatus.FAILED, message=str(exc))

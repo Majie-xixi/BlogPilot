@@ -1,7 +1,10 @@
 from pathlib import Path
+from datetime import time
 import tempfile
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
+from types import SimpleNamespace
 
 from blogpost.application import ApplicationContext
 from blogpost.db import Database
@@ -10,6 +13,25 @@ from blogpost.repositories import Repository
 
 
 class ApplicationNetworkTests(unittest.TestCase):
+    def test_batch_cancellation_skips_remaining_accounts(self):
+        from blogpost.pipeline import Cancellation
+        from blogpost.domain import PublishResult
+        first = SimpleNamespace(id='first', display_name='first', schedule_time=time(0, 0))
+        second = SimpleNamespace(id='second', display_name='second', schedule_time=time(0, 0))
+        token = Cancellation()
+        pipeline = Mock()
+        def run(*args, **kwargs):
+            token.cancel()
+            return PublishResult(RunStatus.SKIPPED, message='已取消')
+        pipeline.run.side_effect = run
+        context = Mock()
+        context.accounts.return_value = [first, second]
+        context.build_pipeline.return_value = pipeline
+        with patch('blogpost.application.internet_connection_status', return_value=True):
+            results = ApplicationContext.run_accounts(context, None, Trigger.MANUAL, cancellation=token)
+        self.assertEqual([result.status for _, result in results], [RunStatus.SKIPPED, RunStatus.SKIPPED])
+        context.build_pipeline.assert_called_once_with('first')
+
     def test_offline_run_stops_before_pipeline_is_built(self):
         with tempfile.TemporaryDirectory() as root:
             database = Database(Path(root) / "test.db")

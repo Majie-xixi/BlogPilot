@@ -12,6 +12,7 @@ import uuid
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID
 from blogpost.publishers.cto51_profile import fetch_profile_snapshot
+from blogpost.ui.settings_dialog import place_dialog
 from blogpost.ui.theme import COLORS
 from blogpost.ui.widgets import ModernCheckButton, RoundedButton, RoundedPanel
 
@@ -35,8 +36,6 @@ class AccountManagerDialog(tk.Toplevel):
         self.title("账号管理")
         self.configure(background=COLORS["surface"])
         self.transient(master)
-        self.geometry(self._centered_geometry(900, 680))
-        self.minsize(820, 630)
         self.vars = {
             "display_name": tk.StringVar(),
             "profile_url": tk.StringVar(),
@@ -52,17 +51,13 @@ class AccountManagerDialog(tk.Toplevel):
             "enabled": tk.BooleanVar(value=True),
         }
         self._build()
+        width, height, _, _ = place_dialog(self, master, (900, 680))
+        self.minsize(min(820, width), min(630, height))
         self._reload(DEFAULT_ACCOUNT_ID)
         self.name_poll_id = self.after(150, self._drain_name_lookup)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.grab_set()
         self.focus_force()
-
-    def _centered_geometry(self, width: int, height: int) -> str:
-        self.update_idletasks()
-        x = self.master.winfo_rootx() + max(10, (self.master.winfo_width() - width) // 2)
-        y = self.master.winfo_rooty() + max(10, (self.master.winfo_height() - height) // 2)
-        return f"{width}x{height}+{x}+{y}"
 
     def _build(self) -> None:
         shell = ttk.Frame(self, style="Surface.TFrame", padding=(26, 22))
@@ -423,9 +418,7 @@ class BatchPublishDialog(tk.Toplevel):
         )
         self.update_idletasks()
         width, height = 500, max(270, 190 + len(accounts) * 54)
-        x = master.winfo_rootx() + max(10, (master.winfo_width() - width) // 2)
-        y = master.winfo_rooty() + max(10, (master.winfo_height() - height) // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        place_dialog(self, master, (width, height))
         self.grab_set()
         self.focus_force()
 

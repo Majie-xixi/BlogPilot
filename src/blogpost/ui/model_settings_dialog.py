@@ -21,10 +21,11 @@ from blogpost.ui.widgets import RoundedButton
 
 
 class SettingsDialog(tk.Toplevel):
-    def __init__(self, master, context, on_saved):
+    def __init__(self, master, context, on_saved, on_test=None):
         super().__init__(master)
         self.withdraw()
         self.context, self.on_saved = context, on_saved
+        self.on_test = on_test
         self.state = SettingsState(context.config)
         self.selected_id = self.state.active_id
         self.page = 'model'
@@ -33,6 +34,7 @@ class SettingsDialog(tk.Toplevel):
         self.dry_run = tk.BooleanVar(self, value=self.state.dry_run)
         self.status = tk.StringVar(self)
         self._setup_running = False
+        self._test_running = False
         for value in self.values.values():
             value.trace_add('write', lambda *_: self.status.set(''))
         self.title('设置')
@@ -382,6 +384,9 @@ class SettingsDialog(tk.Toplevel):
         self.after(150, poll)
 
     def _test(self):
+        if self._test_running:
+            self.status.set('连接测试仍在进行，请等待结果。')
+            return
         self._capture()
         c = replace(self._connection())
         key = None
@@ -395,6 +400,7 @@ class SettingsDialog(tk.Toplevel):
             self.status.set(str(exc))
             return
         self.status.set('正在测试连接…')
+        self._test_running = True
         tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
         results = queue.Queue()
         def run():
@@ -416,9 +422,15 @@ class SettingsDialog(tk.Toplevel):
             except queue.Empty:
                 self.after(150, poll)
             else:
+                self._test_running = False
                 current_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
                 if self.selected_id == c.id and self.page == 'model' and current_values == tested_values:
                     self.status.set(result)
+                    if self.on_test:
+                        configured = next((item for item in self.context.config.connections
+                                           if item.id == self.context.config.active_connection_id), None)
+                        if c == configured and not self.state.keys.get(c.id):
+                            self.on_test(c.id, result == '连接测试成功')
         threading.Thread(target=run, daemon=True).start()
         self.after(150, poll)
 
@@ -468,15 +480,6 @@ class SettingsDialog(tk.Toplevel):
             messagebox.showerror('设置未保存', str(exc), parent=self)
 
     def _place_in_work_area(self):
-        from blogpost.ui.settings_dialog import fit_dialog_geometry, _Rect
-        from ctypes import byref, windll
-        import sys
-        rect = _Rect()
-        if sys.platform == 'win32' and windll.user32.SystemParametersInfoW(0x0030, 0, byref(rect), 0):
-            area = (rect.left, rect.top, rect.right, rect.bottom)
-        else:
-            area = (0, 0, self.winfo_screenwidth(), self.winfo_screenheight())
-        parent = (self.master.winfo_rootx(), self.master.winfo_rooty(), self.master.winfo_width(), self.master.winfo_height())
-        width, height, x, y = fit_dialog_geometry(parent, area, preferred=(900, 720))
+        from blogpost.ui.settings_dialog import place_dialog
+        width, height, _, _ = place_dialog(self, self.master, (900, 720))
         self.minsize(min(650, width), min(440, height))
-        self.geometry(f'{width}x{height}+{x}+{y}')

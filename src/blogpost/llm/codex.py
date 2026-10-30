@@ -60,11 +60,11 @@ class CodexClient:
         except FileNotFoundError as exc:
             raise LlmError('未找到 Codex CLI，请检查安装和 PATH') from exc
         except subprocess.TimeoutExpired as exc:
-            raise LlmError('Codex 调用超时') from exc
+            raise LlmError(f'Codex 调用超时（{self.timeout:g} 秒）；请检查代理、登录状态并在设置中重新测试') from exc
         except OSError as exc:
             raise LlmError('无法启动 Codex CLI') from exc
         if result.returncode != 0:
-            raise LlmError('Codex 调用失败，请检查登录状态、额度和网络')
+            raise LlmError('Codex 调用失败，原因未确定；请检查登录状态、额度和代理，再在设置中测试连接')
         content = result.stdout.strip()
         if not content:
             raise LlmError('Codex 未返回内容')
