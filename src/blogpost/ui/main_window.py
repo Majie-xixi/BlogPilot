@@ -121,6 +121,163 @@ def resolve_today_status(
     return "状态未知"
 
 
+PUBLISH_SUCCESS_AUTO_CLOSE_MS = 60_000
+
+
+def _drop_topmost(dialog: tk.Toplevel) -> None:
+    try:
+        if dialog.winfo_exists():
+            dialog.attributes("-topmost", False)
+    except tk.TclError:
+        pass
+
+
+def _recover_hidden_dialog(root: tk.Misc, dialog: tk.Toplevel) -> None:
+    """主窗口可见而弹窗不可见（被最小化带走、落到屏幕外）时恢复弹窗并放开 grab。
+
+    grab 会把应用其余窗口的输入全部导向弹窗；弹窗一旦不可见，主窗口就表现
+    为无响应。此时宁可失去模态，也不能锁死整个应用。
+    """
+    try:
+        if not root.winfo_viewable() or not dialog.winfo_exists():
+            return
+        width, height = dialog.winfo_width(), dialog.winfo_height()
+        x, y = dialog.winfo_rootx(), dialog.winfo_rooty()
+        off_screen = (
+            x + width <= 0
+            or y + height <= 0
+            or x >= root.winfo_screenwidth()
+            or y >= root.winfo_screenheight()
+        )
+        if not off_screen and dialog.winfo_viewable():
+            return
+        dialog.geometry(
+            f"+{root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)}"
+            f"+{root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)}"
+        )
+        dialog.deiconify()
+        dialog.lift()
+        dialog.attributes("-topmost", True)
+        dialog.after(300, lambda: _drop_topmost(dialog))
+        dialog.grab_release()
+    except tk.TclError:
+        pass
+
+
+def safe_destroy_dialog(dialog: tk.Toplevel) -> None:
+    """安全隐藏并延迟销毁弹窗，避免在事件分发过程中直接销毁引发崩溃。"""
+    try:
+        if not dialog.winfo_exists():
+            return
+        dialog.withdraw()
+    except tk.TclError:
+        return
+
+    def final_destroy() -> None:
+        try:
+            if dialog.winfo_exists():
+                dialog.destroy()
+        except tk.TclError:
+            pass
+
+    try:
+        dialog.after_idle(final_destroy)
+    except tk.TclError:
+        pass
+
+
+def present_modal_dialog(
+    root: tk.Misc,
+    dialog: tk.Toplevel,
+    *,
+    auto_close_ms: int | None = None,
+    modal: bool = False,
+) -> None:
+    """以安全、非阻塞的方式显示结果或通知弹窗。
+
+    默认 modal=False（非模态通知）：绝不调用 grab_set()，彻底避免弹窗长时
+    间无人处理或最小化/息屏后锁死主窗口输入导致软件假死；通过 transient 关联
+    主窗口并监听恢复事件，确保弹窗可见但主窗口永不失去响应能力。
+    仅在显式指定 modal=True 时启用模态 grab，并配备隐藏/越界看护机制。
+    auto_close_ms 用于纯告知类弹窗（如发布成功），无人查看时自动安全关闭。
+    """
+    dialog.transient(root)
+    try:
+        dialog.lift()
+        dialog.attributes("-topmost", True)
+        dialog.after(300, lambda: _drop_topmost(dialog))
+    except tk.TclError:
+        pass
+
+    if modal:
+        try:
+            root.deiconify()
+            root.lift()
+        except tk.TclError:
+            pass
+        dialog.grab_set()
+        dialog.focus_force()
+
+        def watch() -> None:
+            try:
+                if not dialog.winfo_exists():
+                    return
+                _recover_hidden_dialog(root, dialog)
+                dialog.after(1000, watch)
+            except tk.TclError:
+                return
+
+        dialog.after(1000, watch)
+    else:
+        try:
+            dialog.focus_set()
+        except tk.TclError:
+            pass
+
+        map_bind_id = None
+
+        def _cleanup_map_binding(event=None) -> None:
+            nonlocal map_bind_id
+            if map_bind_id is not None:
+                try:
+                    root.unbind("<Map>", map_bind_id)
+                except tk.TclError:
+                    pass
+                map_bind_id = None
+
+        def _on_root_map(event) -> None:
+            try:
+                if event.widget == root and dialog.winfo_exists():
+                    dialog.lift()
+            except tk.TclError:
+                pass
+
+        try:
+            map_bind_id = root.bind("<Map>", _on_root_map, add="+")
+            dialog.bind("<Destroy>", lambda e: _cleanup_map_binding() if e.widget == dialog else None, add="+")
+            setattr(dialog, "_map_bind_id", map_bind_id)
+        except tk.TclError:
+            pass
+
+    if auto_close_ms is None:
+        return
+
+    def auto_close() -> None:
+        try:
+            if not dialog.winfo_exists():
+                return
+            if modal:
+                try:
+                    dialog.grab_release()
+                except tk.TclError:
+                    pass
+        except tk.TclError:
+            return
+        safe_destroy_dialog(dialog)
+
+    dialog.after(auto_close_ms, auto_close)
+
+
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
     match = re.match(
@@ -172,6 +329,7 @@ class MainWindow:
         self.login_sync_generation = 0
         self.batch_progress_positions: dict[str, int] = {}
         self.batch_progress_total = 1
+        self._active_result_dialog: tk.Toplevel | None = None
         self._build()
         self._reload_accounts(DEFAULT_ACCOUNT_ID)
         self.refresh()
@@ -909,6 +1067,7 @@ class MainWindow:
     def run_now(self) -> None:
         if self.running:
             return
+        self._close_active_result_dialog()
         if not self._network_preflight():
             return
         allow = False
@@ -943,6 +1102,7 @@ class MainWindow:
     def retry_latest_article(self) -> None:
         if self.running:
             return
+        self._close_active_result_dialog()
         if not self._network_preflight():
             return
         account_id = self.current_account_id
@@ -999,6 +1159,7 @@ class MainWindow:
         BatchPublishDialog(self.root, accounts, self._start_batch)
 
     def _start_batch(self, account_ids: list[str]) -> None:
+        self._close_active_result_dialog()
         self.running = True
         self._clear_log()
         self._show_log_view()
@@ -1106,7 +1267,13 @@ class MainWindow:
         self.refresh()
         self._show_batch_summary(results)
 
+    def _close_active_result_dialog(self) -> None:
+        if self._active_result_dialog is not None:
+            safe_destroy_dialog(self._active_result_dialog)
+            self._active_result_dialog = None
+
     def _show_batch_summary(self, results: list[tuple[Account, PublishResult]]) -> None:
+        self._close_active_result_dialog()
         dialog = tk.Toplevel(self.root)
         dialog.title("批量任务完成")
         dialog.configure(background=COLORS["surface"])
@@ -1146,10 +1313,11 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(10, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(10, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(self.root, dialog, modal=False)
+        self._active_result_dialog = dialog
 
     def _show_publish_success(self, url: str | None) -> None:
+        self._close_active_result_dialog()
         dialog = tk.Toplevel(self.root)
         dialog.title("发布成功")
         dialog.configure(background=COLORS["surface"])
@@ -1211,10 +1379,16 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(
+            self.root,
+            dialog,
+            auto_close_ms=PUBLISH_SUCCESS_AUTO_CLOSE_MS,
+            modal=False,
+        )
+        self._active_result_dialog = dialog
 
     def _show_task_failure(self, message: str, *, uncertain: bool = False) -> None:
+        self._close_active_result_dialog()
         dialog = tk.Toplevel(self.root)
         dialog.title("发布结果待确认" if uncertain else "任务已停止")
         dialog.configure(background=COLORS["surface"])
@@ -1269,8 +1443,8 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(self.root, dialog, modal=False)
+        self._active_result_dialog = dialog
 
     def open_profile(self) -> None:
         url = self.current_account.profile_url or "https://blog.51cto.com/"
