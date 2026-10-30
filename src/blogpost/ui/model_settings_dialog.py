@@ -11,7 +11,9 @@ from tkinter import messagebox, ttk
 from uuid import uuid4
 
 from blogpost.config import ModelConnection
+from blogpost.freellmapi import FreeLLMAPIError, FreeLLMAPIService, VERSION as FREELLMAPI_VERSION
 from blogpost.llm.client import OpenAICompatibleClient
+from blogpost.llm.codex import CodexClient
 from blogpost.paths import config_path
 from blogpost.ui.settings_state import SettingsState
 from blogpost.ui.theme import COLORS, FONT
@@ -30,6 +32,7 @@ class SettingsDialog(tk.Toplevel):
         self.show_key = tk.BooleanVar(self, value=False)
         self.dry_run = tk.BooleanVar(self, value=self.state.dry_run)
         self.status = tk.StringVar(self)
+        self._setup_running = False
         for value in self.values.values():
             value.trace_add('write', lambda *_: self.status.set(''))
         self.title('设置')
@@ -137,6 +140,7 @@ class SettingsDialog(tk.Toplevel):
             return
         c = self._connection()
         c.name = self.values['name'].get().strip()
+        c.model = self.values['model'].get().strip()
         if c.kind == 'api':
             c.vendor = self.values['vendor'].get()
             c.base_url = self.values['base_url'].get().strip()
@@ -250,6 +254,11 @@ class SettingsDialog(tk.Toplevel):
         if c.kind == 'codex':
             ttk.Label(self.content, text='使用本机 Codex CLI 的登录与模型配置。请先安装并登录 Codex；定时任务也需要在相同运行环境中可用。', style='DialogText.TLabel', wraplength=440).grid(row=4, column=1, sticky='w', pady=(12, 0))
             ttk.Label(self.content, text='客户端：' + ('已找到' if shutil.which('codex') else '未找到'), style='CardDetail.TLabel').grid(row=5, column=1, sticky='w', pady=(10, 0))
+            self._field(8, '指定模型', 'model')
+            ttk.Label(self.content, text='留空使用 Codex CLI 的配置；填写后测试和文章生成均使用此模型。', style='CardDetail.TLabel', wraplength=440).grid(row=9, column=1, sticky='w', pady=(4, 0))
+            RoundedButton(self.content, text='测试连接', command=self._test).grid(row=13, column=1, sticky='w', pady=(12, 0))
+            ttk.Label(self.content, text='测试会发起真实请求，可能消耗额度。', style='CardDetail.TLabel').grid(row=14, column=1, sticky='w', pady=(4, 0))
+            ttk.Label(self.content, textvariable=self.status, style='CardDetail.TLabel', wraplength=440).grid(row=15, column=1, sticky='w', pady=(4, 0))
         else:
             ttk.Label(self.content, text='供应商', style='Field.TLabel').grid(row=4, column=0, sticky='nw', pady=(18, 0))
             style = ttk.Style(self)
@@ -274,7 +283,11 @@ class SettingsDialog(tk.Toplevel):
             RoundedButton(self.content, text='测试连接', command=self._test).grid(row=13, column=1, sticky='w', pady=(12, 0))
             ttk.Label(self.content, text='测试会发起真实请求，可能产生费用。', style='CardDetail.TLabel').grid(row=14, column=1, sticky='w', pady=(4, 0))
             ttk.Label(self.content, textvariable=self.status, style='CardDetail.TLabel', wraplength=440).grid(row=15, column=1, sticky='w', pady=(4, 0))
-            RoundedButton(self.content, text='删除连接', command=self._delete).grid(row=17, column=1, sticky='w', pady=(12, 0))
+            if c.id == 'freellmapi':
+                RoundedButton(self.content, text='启动并自动配置', command=self._setup_freellmapi).grid(row=17, column=1, sticky='w', pady=(12, 0))
+                ttk.Label(self.content, text='复用本机桌面服务；首次安装将提示下载。完成后请保存设置。', style='CardDetail.TLabel', wraplength=440).grid(row=18, column=1, sticky='w', pady=(5, 0))
+            else:
+                RoundedButton(self.content, text='删除连接', command=self._delete).grid(row=17, column=1, sticky='w', pady=(12, 0))
         if c.id != self.state.active_id:
             RoundedButton(self.content, text='设为当前连接', command=self._activate).grid(row=16, column=1, sticky='w', pady=(18, 0))
 
@@ -291,14 +304,93 @@ class SettingsDialog(tk.Toplevel):
         self._refresh_list()
         self._show_connection()
 
+    def _setup_freellmapi(self):
+        if self._setup_running:
+            return
+        self._capture()
+        service = FreeLLMAPIService()
+        missing = not service.is_installed()
+        if missing and not messagebox.askyesno(
+            '安装 FreeLLMAPI',
+            f'未检测到 FreeLLMAPI。将从官方 GitHub 下载并安装 Windows 版 {FREELLMAPI_VERSION}，校验文件后启动服务。是否继续？',
+            parent=self,
+        ):
+            return
+        self._setup_running = True
+        self.status.set('正在检查 FreeLLMAPI，模型测试可能需要数分钟…')
+        connection_id = self.selected_id
+        tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+        results = queue.Queue()
+
+        def run():
+            try:
+                base, key = service.prepare(missing, lambda message: results.put(('progress', message)))
+                try:
+                    response = OpenAICompatibleClient(base, 'auto', key, timeout=135, max_retries=0).complete(
+                        [{'role': 'user', 'content': 'Reply OK.'}])
+                    if not response.strip():
+                        raise ValueError('模型未返回内容')
+                except Exception:
+                    results.put(('configured', (base, key, False)))
+                else:
+                    results.put(('configured', (base, key, True)))
+            except FreeLLMAPIError as exc:
+                results.put(('error', str(exc)))
+            except Exception:
+                results.put(('error', 'FreeLLMAPI 配置失败，请检查服务和网络。'))
+
+        def poll():
+            if not self.winfo_exists():
+                return
+            try:
+                kind, value = results.get_nowait()
+            except queue.Empty:
+                self.after(150, poll)
+                return
+            if kind == 'progress':
+                if self.page == 'model' and self.selected_id == connection_id:
+                    self.status.set(value)
+                self.after(150, poll)
+                return
+            self._setup_running = False
+            if self.page != 'model' or self.selected_id != connection_id:
+                return
+            if kind == 'error':
+                self.status.set(value)
+                return
+            current = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+            if current != tested_values:
+                self.status.set('配置已变化，请重新点击“启动并自动配置”。')
+                return
+            base, key, passed = value
+            self.values['base_url'].set(base)
+            self.values['model'].set('auto')
+            connection = self._connection()
+            connection.base_url = base
+            connection.model = 'auto'
+            self.state.keys[connection_id] = key
+            self.values['key'].set(key)
+            if passed:
+                self.state.active_id = connection_id
+                self._refresh_list()
+                self._show_connection()
+                self.status.set('服务已连接并设为当前连接，请点击“保存设置”。')
+            else:
+                self.status.set('服务已启动，但模型测试失败；请检查管理页的上游供应商和网络。')
+
+        threading.Thread(target=run, daemon=True).start()
+        self.after(150, poll)
+
     def _test(self):
         self._capture()
         c = replace(self._connection())
+        key = None
         try:
-            key = (self.context.secrets.get_api_key(c.id) if c.id == 'legacy-api' and os.environ.get('BLOGPOST_API_KEY')
-                   else self.state.keys.get(c.id) or self.context.secrets.get_api_key(c.id))
-            if not c.base_url or not c.model or not key:
-                raise ValueError('请先填写地址、模型和 API Key')
+            if c.kind == 'api':
+                key = (self.context.secrets.get_api_key(c.id) if c.id == 'legacy-api' and os.environ.get('BLOGPOST_API_KEY')
+                       else self.state.keys.get(c.id) or self.context.secrets.get_api_key(c.id))
+                if not c.base_url or not c.model or not key:
+                    raise ValueError('请先填写地址、模型和 API Key')
         except Exception as exc:
             self.status.set(str(exc))
             return
@@ -307,10 +399,15 @@ class SettingsDialog(tk.Toplevel):
         results = queue.Queue()
         def run():
             try:
-                OpenAICompatibleClient(c.base_url, c.model, key, timeout=20, max_retries=0).complete([{'role': 'user', 'content': 'Reply OK.'}])
+                client = (CodexClient(timeout=60, model=c.model) if c.kind == 'codex' else
+                          OpenAICompatibleClient(c.base_url, c.model, key, timeout=135 if c.id == 'freellmapi' else 20, max_retries=0))
+                if not client.complete([{'role': 'user', 'content': 'Reply OK.'}]).strip():
+                    raise ValueError('模型未返回内容')
                 results.put('连接测试成功')
-            except Exception:
-                results.put('连接测试失败，请检查地址、模型、密钥和网络。')
+            except Exception as exc:
+                from blogpost.llm.client import LlmError
+                detail = str(exc) if isinstance(exc, (LlmError, ValueError)) else '请检查地址、模型、密钥和网络。'
+                results.put('连接测试失败：' + detail)
         def poll():
             if not self.winfo_exists():
                 return

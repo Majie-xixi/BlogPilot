@@ -6,8 +6,9 @@ from blogpost.llm.client import LlmError
 
 
 class CodexClient:
-    def __init__(self, timeout: float = 600):
+    def __init__(self, timeout: float = 600, model: str = ''):
         self.timeout = timeout
+        self.model = model.strip()
 
     def complete(
         self,
@@ -24,8 +25,12 @@ class CodexClient:
             f"[{message['role']}]\n{message['content']}" for message in messages
         )
         try:
+            command = ['codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check']
+            if self.model:
+                command.extend(['--model', self.model])
+            command.append('-')
             result = subprocess.run(
-                ['codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '-'],
+                command,
                 input=prompt,
                 capture_output=True,
                 text=True,

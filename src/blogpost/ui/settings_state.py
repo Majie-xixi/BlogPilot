@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from blogpost.config import AppConfig
+from blogpost.config import AppConfig, ModelConnection
 
 
 class SettingsState:
@@ -10,6 +10,12 @@ class SettingsState:
         self.original = config
         source = replace(config, connections=[replace(c) for c in config.connections])
         source.ensure_connections()
+        preset = next((c for c in source.connections if c.id == 'freellmapi'), None)
+        if preset is None:
+            preset = ModelConnection('freellmapi', 'FreeLLMAPI', 'api', '自定义', 'http://127.0.0.1:31415/v1', 'auto')
+        else:
+            source.connections.remove(preset)
+        source.connections.insert(min(1, len(source.connections)), preset)
         self.connections = source.connections
         self.active_id = source.active_connection_id
         self.dry_run = source.dry_run

@@ -87,7 +87,7 @@ class ApplicationContext:
         connection = config.current_connection() if config.connections else None
         provider = connection.kind if connection else config.provider
         if provider == "codex":
-            client = CodexClient()
+            client = CodexClient(model=connection.model if connection else '')
         elif provider == "api":
             api_key = self.secrets.get_api_key(connection.id) if connection else self.secrets.get_api_key()
             if not api_key:

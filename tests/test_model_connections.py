@@ -45,7 +45,7 @@ class ModelConnectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             state.remove_connection('codex')
         state.remove_connection('legacy-api')
-        self.assertEqual([c.id for c in state.connections], ['codex'])
+        self.assertEqual([c.id for c in state.connections], ['freellmapi', 'codex'])
         self.assertEqual(len(cfg.connections), 2)
         self.assertEqual(state.deleted_ids, {'legacy-api'})
 
@@ -88,7 +88,7 @@ class ModelConnectionTests(unittest.TestCase):
             backups = list(root.glob('api-key.bin.deleted-*.bak'))
             self.assertEqual(len(backups), 1)
             self.assertNotIn(b'old-key', backups[0].read_bytes())
-            self.assertEqual([c.id for c in AppConfig.load(root / 'config.json').connections], ['codex'])
+            self.assertEqual([c.id for c in AppConfig.load(root / 'config.json').connections], ['freellmapi', 'codex'])
 
     def test_compatible_local_gateway_receives_chat_completions_and_json_mode(self):
         import json
@@ -154,7 +154,7 @@ class ModelConnectionTests(unittest.TestCase):
         state.active_id = state.connections[0].id
         state.dry_run = False
         updated = state.configuration()
-        self.assertEqual(len(updated.connections), 2)
+        self.assertEqual(len(updated.connections), 3)
         self.assertEqual(updated.current_connection().model, 'changed-model')
         self.assertFalse(updated.dry_run)
         self.assertEqual(cfg.connections[0].model, 'deepseek-v4-pro')
@@ -222,6 +222,17 @@ class ModelConnectionTests(unittest.TestCase):
                 context = SimpleNamespace(config=cfg, secrets=DpapiSecretStore(Path(root) / 'api-key.bin'))
                 dialog = SettingsDialog(window, context, Mock())
                 window.update()
+                dialog._select('codex')
+                dialog.values['model'].set('selected-model')
+                codex = Mock(); codex.complete.return_value = 'OK'
+                with patch('blogpost.ui.model_settings_dialog.CodexClient', return_value=codex) as codex_type:
+                    dialog._test()
+                    deadline = time.monotonic() + 3
+                    while dialog.status.get() == '正在测试连接…' and time.monotonic() < deadline:
+                        window.update(); time.sleep(0.02)
+                    codex_type.assert_called_once_with(timeout=60, model='selected-model')
+                    self.assertEqual(dialog.status.get(), '连接测试成功')
+                dialog._select('legacy-api')
                 dialog.values['model'].set('custom-model')
                 dialog._show_page('safety')
                 self.assertEqual(dialog.safety_label.get(), '安全试运行：已开启')
@@ -255,7 +266,7 @@ class ModelConnectionTests(unittest.TestCase):
                     client.complete.assert_called_once()
                 dialog._activate()
                 self.assertEqual(dialog.state.active_id, dialog.selected_id)
-                self.assertEqual(len(dialog.state.connections), 3)
+                self.assertEqual(len(dialog.state.connections), 4)
                 with patch('blogpost.ui.model_settings_dialog.config_path', return_value=Path(root) / 'config.json'), patch('blogpost.ui.model_settings_dialog.messagebox.showerror') as error:
                     dialog._save()
                     error.assert_not_called()

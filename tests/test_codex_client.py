@@ -8,6 +8,13 @@ from blogpost.llm.codex import CodexClient
 
 
 class CodexClientTests(unittest.TestCase):
+    @patch('blogpost.llm.codex.subprocess.run')
+    def test_optional_model_is_passed_to_codex(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, stdout='OK', stderr='')
+        CodexClient(model='test-model').complete([{'role': 'user', 'content': 'hello'}])
+        args = run.call_args.args[0]
+        self.assertEqual(args[args.index('--model') + 1], 'test-model')
+
     @patch("blogpost.llm.codex.subprocess.run")
     def test_completion_passes_prompt_via_stdin_and_returns_output(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, stdout='{"ok": true}\n', stderr='')
@@ -44,6 +51,19 @@ class CodexClientTests(unittest.TestCase):
 
 
 class CodexConfigTests(unittest.TestCase):
+    @patch('blogpost.application.PublishingPipeline')
+    @patch('blogpost.application.app_data_dir')
+    def test_pipeline_uses_explicit_codex_model(self, data_dir, pipeline):
+        from pathlib import Path
+        from blogpost.application import ApplicationContext
+        from blogpost.config import AppConfig, ModelConnection
+        data_dir.return_value = Path('.')
+        cfg = AppConfig(connections=[ModelConnection('codex', 'Codex', 'codex', model='selected-model')], active_connection_id='codex')
+        account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
+        repository = Mock(); repository.get_account.return_value = account
+        ApplicationContext(cfg, repository, Mock(), Mock(), Mock(), Mock()).build_pipeline()
+        self.assertEqual(pipeline.call_args.args[3].client.model, 'selected-model')
+
     def test_codex_does_not_require_api_configuration_and_round_trips(self):
         from blogpost.config import AppConfig
         cfg = AppConfig(provider='codex', api_base_url='', model='')

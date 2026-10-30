@@ -15,6 +15,7 @@ import webbrowser
 from blogpost.application import ApplicationContext
 from blogpost.domain import Account, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
 from blogpost.network import internet_connection_status
+from blogpost.paths import config_path
 from blogpost.publishers.cto51_profile import ProfileSnapshot
 from blogpost.ui.account_dialog import (
     AccountManagerDialog,
@@ -481,6 +482,9 @@ class MainWindow:
             row=0, column=0, sticky="w", padx=(0, 7)
         )
         ttk.Label(card, text=caption, style="CardCaption.TLabel").grid(row=0, column=1, sticky="w")
+        if caption == "发布模式":
+            RoundedButton(card, text="切换", command=self.toggle_dry_run, variant="secondary",
+                          height=28, outer=COLORS["surface"]).grid(row=0, column=2, sticky="e")
         value_style = (
             "CardSuccessValue.TLabel"
             if caption == "今日状态"
@@ -891,6 +895,24 @@ class MainWindow:
 
     def open_settings(self) -> None:
         SettingsDialog(self.root, self.context, self.refresh)
+
+    def toggle_dry_run(self) -> None:
+        if self.running:
+            messagebox.showinfo("任务运行中", "请等待当前任务结束后再切换发布模式。")
+            return
+        current = self.context.config
+        if current.dry_run and not messagebox.askyesno(
+            "切换为真实发布", "关闭安全试运行后，所有账号的后续手动及定时任务可能自动发布到 51CTO。是否继续？"
+        ):
+            return
+        updated = replace(current, dry_run=not current.dry_run)
+        try:
+            updated.save(config_path())
+        except Exception as exc:
+            messagebox.showerror("切换失败", f"发布模式未更改：{exc}")
+            return
+        self.context.config = updated
+        self.refresh()
 
     def _network_preflight(self) -> bool:
         status = internet_connection_status()
