@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from blogpost.config import AppConfig, ModelConnection
+from blogpost.config import AppConfig, ModelConnection, validate_proxy
 
 
 class SettingsState:
@@ -35,6 +35,8 @@ class SettingsState:
             self.deleted_ids.add(connection_id)
 
     def configuration(self) -> AppConfig:
+        for connection in self.connections:
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
         ids = [c.id for c in self.connections]
         if len(ids) != len(set(ids)) or any(not c.name.strip() for c in self.connections):
             raise ValueError('连接名称不能为空，且连接标识不能重复')

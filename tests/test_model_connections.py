@@ -11,6 +11,48 @@ from blogpost.secrets import DpapiSecretStore
 
 
 class ModelConnectionTests(unittest.TestCase):
+    def test_dialog_preserves_proxy_draft_per_connection(self):
+        import tkinter as tk
+        from blogpost.ui.model_settings_dialog import SettingsDialog
+        from blogpost.ui.theme import configure_theme
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            configure_theme(root)
+            cfg = AppConfig(provider='codex')
+            cfg.ensure_connections()
+            dialog = SettingsDialog(root, SimpleNamespace(config=cfg, secrets=Mock()), Mock())
+            dialog._select('codex')
+            dialog.values['proxy_mode'].set('手动代理')
+            dialog.values['proxy_url'].set('http://127.0.0.1:7890')
+            dialog._select('legacy-api')
+            self.assertEqual(dialog.values['proxy_mode'].get(), '跟随当前环境')
+            dialog._select('codex')
+            self.assertEqual(dialog.values['proxy_mode'].get(), '手动代理')
+            self.assertEqual(dialog.values['proxy_url'].get(), 'http://127.0.0.1:7890')
+            import time
+            client = Mock(); client.complete.return_value = 'OK'
+            with patch('blogpost.ui.model_settings_dialog.CodexClient', return_value=client) as factory:
+                dialog._test()
+                deadline = time.monotonic() + 3
+                while dialog.status.get() == '正在测试连接…' and time.monotonic() < deadline:
+                    root.update(); time.sleep(0.02)
+                self.assertEqual(dialog.status.get(), '连接测试成功')
+                factory.assert_called_once_with(timeout=60, model='', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')
+            root.update_idletasks()
+            for callback_id in root.tk.call('after', 'info'):
+                root.after_cancel(callback_id)
+            dialog.destroy()
+        finally:
+            root.destroy()
+
+    def test_connection_proxy_settings_round_trip(self):
+        connection = ModelConnection('c', 'Codex', 'codex', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')
+        config = AppConfig(connections=[connection], active_connection_id='c')
+        config.validate_for_run()
+        loaded = AppConfig.from_json_dict(config.to_json_dict()).current_connection()
+        self.assertEqual((loaded.proxy_mode, loaded.proxy_url), ('manual', 'http://127.0.0.1:7890'))
+
     def test_legacy_configuration_becomes_two_connections_without_losing_values(self):
         cfg = AppConfig.from_json_dict({'provider': 'codex', 'api_base_url': 'https://example.test/v1', 'model': 'custom', 'dry_run': False})
         self.assertEqual(cfg.current_connection().kind, 'codex')
@@ -135,6 +177,18 @@ class ModelConnectionTests(unittest.TestCase):
 
     @patch('blogpost.application.PublishingPipeline')
     @patch('blogpost.application.app_data_dir', return_value=Path('.'))
+    @patch('blogpost.application.OpenAICompatibleClient')
+    def test_api_pipeline_passes_active_proxy_to_client(self, client, data_dir, pipeline):
+        from blogpost.application import ApplicationContext
+        cfg = AppConfig(connections=[ModelConnection('api', 'API', 'api', base_url='https://example.test/v1', model='m', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')], active_connection_id='api')
+        account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
+        repository = Mock(); repository.get_account.return_value = account
+        secrets = Mock(); secrets.get_api_key.return_value = 'key'
+        ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock()).build_pipeline()
+        client.assert_called_once_with('https://example.test/v1', 'm', 'key', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')
+
+    @patch('blogpost.application.PublishingPipeline')
+    @patch('blogpost.application.app_data_dir', return_value=Path('.'))
     def test_pipeline_uses_codex_without_accessing_api_keys(self, data_dir, pipeline):
         from blogpost.application import ApplicationContext
         from blogpost.llm.codex import CodexClient
@@ -189,6 +243,30 @@ class ModelConnectionTests(unittest.TestCase):
             self.assertEqual(store.get_api_key(), 'new-key')
             self.assertEqual(AppConfig.load(path).current_connection().model, 'model')
             self.assertFalse(AppConfig.load(path).dry_run)
+
+    def test_first_proxy_save_backups_previous_configuration(self):
+        import json
+        from blogpost.ui.model_settings_dialog import SettingsDialog
+        from blogpost.ui.settings_state import SettingsState
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'config.json'
+            original = {'connections': [{'id': 'codex', 'name': 'Codex', 'kind': 'codex'}], 'active_connection_id': 'codex'}
+            path.write_text(json.dumps(original), encoding='utf-8')
+            state = SettingsState(AppConfig.from_json_dict(original))
+            dialog = SimpleNamespace(state=state, context=SimpleNamespace(secrets=Mock()), dry_run=Mock(get=Mock(return_value=True)), _capture=Mock(), on_saved=Mock(), destroy=Mock())
+            with patch('blogpost.ui.model_settings_dialog.config_path', return_value=path), patch('blogpost.ui.model_settings_dialog.messagebox.showerror') as error:
+                SettingsDialog._save(dialog)
+                error.assert_not_called()
+            self.assertEqual(json.loads(path.with_suffix('.json.pre-proxy-settings.bak').read_text(encoding='utf-8')), original)
+
+    def test_non_settings_save_also_backs_up_previous_configuration(self):
+        import json
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'config.json'
+            original = {'connections': [{'id': 'codex', 'name': 'Codex', 'kind': 'codex'}], 'active_connection_id': 'codex'}
+            path.write_text(json.dumps(original), encoding='utf-8')
+            AppConfig.load(path).save(path)
+            self.assertEqual(json.loads(path.with_suffix('.json.pre-proxy-settings.bak').read_text(encoding='utf-8')), original)
 
     def test_failed_config_save_restores_previous_key(self):
         from blogpost.ui.model_settings_dialog import SettingsDialog

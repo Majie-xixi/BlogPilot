@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from uuid import uuid4
 
-from blogpost.config import ModelConnection
+from blogpost.config import ModelConnection, validate_proxy
 from blogpost.freellmapi import FreeLLMAPIError, FreeLLMAPIService, VERSION as FREELLMAPI_VERSION
 from blogpost.llm.client import OpenAICompatibleClient
 from blogpost.llm.codex import CodexClient, find_codex
@@ -18,6 +18,14 @@ from blogpost.paths import config_path
 from blogpost.ui.settings_state import SettingsState
 from blogpost.ui.theme import COLORS, FONT
 from blogpost.ui.widgets import RoundedButton
+
+PROXY_LABELS = {'environment': '跟随当前环境', 'manual': '手动代理', 'direct': '直连'}
+
+
+def _proxy_options(connection):
+    if connection.proxy_mode == 'environment':
+        return {}
+    return {'proxy_mode': connection.proxy_mode, 'proxy_url': connection.proxy_url}
 
 
 class SettingsDialog(tk.Toplevel):
@@ -29,7 +37,7 @@ class SettingsDialog(tk.Toplevel):
         self.state = SettingsState(context.config)
         self.selected_id = self.state.active_id
         self.page = 'model'
-        self.values = {key: tk.StringVar(self) for key in ('name', 'vendor', 'base_url', 'model', 'key')}
+        self.values = {key: tk.StringVar(self) for key in ('name', 'vendor', 'base_url', 'model', 'key', 'proxy_mode', 'proxy_url')}
         self.show_key = tk.BooleanVar(self, value=False)
         self.dry_run = tk.BooleanVar(self, value=self.state.dry_run)
         self.status = tk.StringVar(self)
@@ -143,6 +151,8 @@ class SettingsDialog(tk.Toplevel):
         c = self._connection()
         c.name = self.values['name'].get().strip()
         c.model = self.values['model'].get().strip()
+        c.proxy_mode = next((mode for mode, label in PROXY_LABELS.items() if label == self.values['proxy_mode'].get()), '')
+        c.proxy_url = self.values['proxy_url'].get().strip()
         if c.kind == 'api':
             c.vendor = self.values['vendor'].get()
             c.base_url = self.values['base_url'].get().strip()
@@ -243,6 +253,8 @@ class SettingsDialog(tk.Toplevel):
         c = self._connection()
         for name in ('name', 'vendor', 'base_url', 'model'):
             self.values[name].set(getattr(c, name))
+        self.values['proxy_mode'].set(PROXY_LABELS.get(c.proxy_mode, ''))
+        self.values['proxy_url'].set(c.proxy_url)
         self.values['key'].set(self.state.keys.get(c.id, ''))
         title = ttk.Frame(self.content, style='Surface.TFrame')
         title.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 12))
@@ -258,9 +270,6 @@ class SettingsDialog(tk.Toplevel):
             ttk.Label(self.content, text='客户端：' + ('已找到' if find_codex() else '未找到'), style='CardDetail.TLabel').grid(row=5, column=1, sticky='w', pady=(10, 0))
             self._field(8, '指定模型', 'model')
             ttk.Label(self.content, text='留空使用 Codex CLI 的配置；填写后测试和文章生成均使用此模型。', style='CardDetail.TLabel', wraplength=440).grid(row=9, column=1, sticky='w', pady=(4, 0))
-            RoundedButton(self.content, text='测试连接', command=self._test).grid(row=13, column=1, sticky='w', pady=(12, 0))
-            ttk.Label(self.content, text='测试会发起真实请求，可能消耗额度。', style='CardDetail.TLabel').grid(row=14, column=1, sticky='w', pady=(4, 0))
-            ttk.Label(self.content, textvariable=self.status, style='CardDetail.TLabel', wraplength=440).grid(row=15, column=1, sticky='w', pady=(4, 0))
         else:
             ttk.Label(self.content, text='供应商', style='Field.TLabel').grid(row=4, column=0, sticky='nw', pady=(18, 0))
             style = ttk.Style(self)
@@ -282,16 +291,20 @@ class SettingsDialog(tk.Toplevel):
                 if os.environ.get('BLOGPOST_API_KEY'):
                     hint = '当前使用 BLOGPOST_API_KEY 环境变量；保存的密钥在其移除后生效'
             ttk.Label(self.content, text=hint, style='CardDetail.TLabel', wraplength=440).grid(row=12, column=1, sticky='w', pady=(5, 0))
-            RoundedButton(self.content, text='测试连接', command=self._test).grid(row=13, column=1, sticky='w', pady=(12, 0))
-            ttk.Label(self.content, text='测试会发起真实请求，可能产生费用。', style='CardDetail.TLabel').grid(row=14, column=1, sticky='w', pady=(4, 0))
-            ttk.Label(self.content, textvariable=self.status, style='CardDetail.TLabel', wraplength=440).grid(row=15, column=1, sticky='w', pady=(4, 0))
             if c.id == 'freellmapi':
-                RoundedButton(self.content, text='启动并自动配置', command=self._setup_freellmapi).grid(row=17, column=1, sticky='w', pady=(12, 0))
-                ttk.Label(self.content, text='复用本机桌面服务；首次安装将提示下载。完成后请保存设置。', style='CardDetail.TLabel', wraplength=440).grid(row=18, column=1, sticky='w', pady=(5, 0))
+                RoundedButton(self.content, text='启动并自动配置', command=self._setup_freellmapi).grid(row=21, column=1, sticky='w', pady=(12, 0))
+                ttk.Label(self.content, text='复用本机桌面服务；首次安装将提示下载。完成后请保存设置。', style='CardDetail.TLabel', wraplength=440).grid(row=22, column=1, sticky='w', pady=(5, 0))
             else:
-                RoundedButton(self.content, text='删除连接', command=self._delete).grid(row=17, column=1, sticky='w', pady=(12, 0))
+                RoundedButton(self.content, text='删除连接', command=self._delete).grid(row=21, column=1, sticky='w', pady=(12, 0))
+        ttk.Label(self.content, text='代理模式', style='Field.TLabel', font=(FONT, 10, 'bold')).grid(row=13, column=0, sticky='nw', pady=(18, 0))
+        ttk.Combobox(self.content, textvariable=self.values['proxy_mode'], values=tuple(PROXY_LABELS.values()), state='readonly', style='Settings.TCombobox').grid(row=13, column=1, sticky='ew', pady=(12, 0))
+        self._field(14, '代理地址', 'proxy_url')
+        ttk.Label(self.content, text='手动代理填写 HTTP 地址和端口，不支持账号密码；测试和生成使用同一设置。', style='CardDetail.TLabel', wraplength=440).grid(row=15, column=1, sticky='w', pady=(4, 0))
+        RoundedButton(self.content, text='测试连接', command=self._test).grid(row=17, column=1, sticky='w', pady=(12, 0))
+        ttk.Label(self.content, text='测试会发起真实请求，可能消耗额度或产生费用。', style='CardDetail.TLabel').grid(row=18, column=1, sticky='w', pady=(4, 0))
+        ttk.Label(self.content, textvariable=self.status, style='CardDetail.TLabel', wraplength=440).grid(row=19, column=1, sticky='w', pady=(4, 0))
         if c.id != self.state.active_id:
-            RoundedButton(self.content, text='设为当前连接', command=self._activate).grid(row=16, column=1, sticky='w', pady=(18, 0))
+            RoundedButton(self.content, text='设为当前连接', command=self._activate).grid(row=20, column=1, sticky='w', pady=(18, 0))
 
     def _vendor_selected(self, _event=None):
         vendor = self.values['vendor'].get()
@@ -310,6 +323,12 @@ class SettingsDialog(tk.Toplevel):
         if self._setup_running:
             return
         self._capture()
+        connection = replace(self._connection())
+        try:
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
         service = FreeLLMAPIService()
         missing = not service.is_installed()
         if missing and not messagebox.askyesno(
@@ -321,14 +340,14 @@ class SettingsDialog(tk.Toplevel):
         self._setup_running = True
         self.status.set('正在检查 FreeLLMAPI，模型测试可能需要数分钟…')
         connection_id = self.selected_id
-        tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+        tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key', 'proxy_mode', 'proxy_url'))
         results = queue.Queue()
 
         def run():
             try:
                 base, key = service.prepare(missing, lambda message: results.put(('progress', message)))
                 try:
-                    response = OpenAICompatibleClient(base, 'auto', key, timeout=135, max_retries=0).complete(
+                    response = OpenAICompatibleClient(base, 'auto', key, timeout=135, max_retries=0, **_proxy_options(connection)).complete(
                         [{'role': 'user', 'content': 'Reply OK.'}])
                     if not response.strip():
                         raise ValueError('模型未返回内容')
@@ -360,7 +379,7 @@ class SettingsDialog(tk.Toplevel):
             if kind == 'error':
                 self.status.set(value)
                 return
-            current = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+            current = tuple(self.values[name].get() for name in ('base_url', 'model', 'key', 'proxy_mode', 'proxy_url'))
             if current != tested_values:
                 self.status.set('配置已变化，请重新点击“启动并自动配置”。')
                 return
@@ -391,6 +410,7 @@ class SettingsDialog(tk.Toplevel):
         c = replace(self._connection())
         key = None
         try:
+            validate_proxy(c.proxy_mode, c.proxy_url)
             if c.kind == 'api':
                 key = (self.context.secrets.get_api_key(c.id) if c.id == 'legacy-api' and os.environ.get('BLOGPOST_API_KEY')
                        else self.state.keys.get(c.id) or self.context.secrets.get_api_key(c.id))
@@ -401,12 +421,12 @@ class SettingsDialog(tk.Toplevel):
             return
         self.status.set('正在测试连接…')
         self._test_running = True
-        tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+        tested_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key', 'proxy_mode', 'proxy_url'))
         results = queue.Queue()
         def run():
             try:
-                client = (CodexClient(timeout=60, model=c.model) if c.kind == 'codex' else
-                          OpenAICompatibleClient(c.base_url, c.model, key, timeout=135 if c.id == 'freellmapi' else 20, max_retries=0))
+                client = (CodexClient(timeout=60, model=c.model, **_proxy_options(c)) if c.kind == 'codex' else
+                          OpenAICompatibleClient(c.base_url, c.model, key, timeout=135 if c.id == 'freellmapi' else 20, max_retries=0, **_proxy_options(c)))
                 if not client.complete([{'role': 'user', 'content': 'Reply OK.'}]).strip():
                     raise ValueError('模型未返回内容')
                 results.put('连接测试成功')
@@ -423,7 +443,7 @@ class SettingsDialog(tk.Toplevel):
                 self.after(150, poll)
             else:
                 self._test_running = False
-                current_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key'))
+                current_values = tuple(self.values[name].get() for name in ('base_url', 'model', 'key', 'proxy_mode', 'proxy_url'))
                 if self.selected_id == c.id and self.page == 'model' and current_values == tested_values:
                     self.status.set(result)
                     if self.on_test:
@@ -441,10 +461,12 @@ class SettingsDialog(tk.Toplevel):
             cfg = self.state.configuration()
             path = config_path()
             # Preserve pre-migration data before the first new-format save.
-            if path.exists() and 'connections' not in json.loads(path.read_text(encoding='utf-8')):
-                backup = path.with_suffix(path.suffix + '.pre-model-connections.bak')
-                if not backup.exists():
-                    shutil.copy2(path, backup)
+            if path.exists():
+                previous = json.loads(path.read_text(encoding='utf-8'))
+                if 'connections' not in previous:
+                    backup = path.with_suffix(path.suffix + '.pre-model-connections.bak')
+                    if not backup.exists():
+                        shutil.copy2(path, backup)
             store = self.context.secrets
             snapshots = {}
             try:

@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from datetime import time
 import json
+import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class ConfigError(ValueError):
@@ -25,6 +27,28 @@ class ModelConnection:
     vendor: str = ""
     base_url: str = ""
     model: str = ""
+    proxy_mode: str = "environment"
+    proxy_url: str = ""
+
+
+def validate_proxy(mode: str, address: str) -> None:
+    if mode not in {'environment', 'manual', 'direct'}:
+        raise ConfigError('代理模式无效')
+    if not address:
+        if mode == 'manual':
+            raise ConfigError('手动代理需要填写 HTTP 地址和端口')
+        return
+    try:
+        parsed = urlsplit(address)
+        valid = (address == address.strip() and parsed.scheme.lower() == 'http'
+                 and bool(parsed.hostname) and parsed.port is not None and 1 <= parsed.port <= 65535
+                 and parsed.username is None and parsed.password is None
+                 and parsed.path in ('', '/') and not parsed.query and not parsed.fragment
+                 and not any(ch.isspace() for ch in address))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ConfigError('代理地址须为不含账号密码的 HTTP 地址和端口，例如 http://127.0.0.1:7890')
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -69,6 +93,7 @@ class AppConfig:
     def validate_for_run(self) -> None:
         if self.connections:
             connection = self.current_connection()
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
             if connection.kind not in {"api", "codex"}:
                 raise ConfigError("invalid model provider")
             if connection.kind == "api" and (not connection.model.strip() or not connection.base_url.strip()):
@@ -150,7 +175,17 @@ class AppConfig:
         )
 
     def save(self, path: Path) -> None:
+        for connection in self.connections:
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            previous = json.loads(path.read_text(encoding='utf-8'))
+            old_connections = previous.get('connections', [])
+            needs_backup = (any('proxy_mode' not in item or 'proxy_url' not in item for item in old_connections)
+                            or ('connections' not in previous and bool(self.connections)))
+            backup = path.with_suffix(path.suffix + '.pre-proxy-settings.bak')
+            if needs_backup and not backup.exists():
+                shutil.copy2(path, backup)
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(
             json.dumps(self.to_json_dict(), ensure_ascii=False, indent=2),

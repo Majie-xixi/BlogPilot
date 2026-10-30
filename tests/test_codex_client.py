@@ -83,6 +83,22 @@ class CodexClientTests(unittest.TestCase):
 class CodexConfigTests(unittest.TestCase):
     @patch('blogpost.application.PublishingPipeline')
     @patch('blogpost.application.app_data_dir')
+    def test_pipeline_uses_active_connection_proxy(self, data_dir, pipeline):
+        from pathlib import Path
+        from blogpost.application import ApplicationContext
+        from blogpost.config import AppConfig, ModelConnection
+        data_dir.return_value = Path('.')
+        cfg = AppConfig(connections=[ModelConnection('codex', 'Codex', 'codex', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')], active_connection_id='codex')
+        account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time,
+                                  category='', profile_url='', article_type='', content_directions='', keywords='',
+                                  secondary_category='', personal_category='')
+        repository = Mock(); repository.get_account.return_value = account
+        ApplicationContext(cfg, repository, Mock(), Mock(), Mock(), Mock()).build_pipeline()
+        client = pipeline.call_args.args[3].client
+        self.assertEqual((client.proxy_mode, client.proxy_url), ('manual', 'http://127.0.0.1:7890'))
+
+    @patch('blogpost.application.PublishingPipeline')
+    @patch('blogpost.application.app_data_dir')
     def test_pipeline_uses_explicit_codex_model(self, data_dir, pipeline):
         from pathlib import Path
         from blogpost.application import ApplicationContext

@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from blogpost.llm.client import LlmError
+from blogpost.config import validate_proxy
 
 
 def find_codex() -> str | None:
@@ -23,9 +24,12 @@ def find_codex() -> str | None:
 
 
 class CodexClient:
-    def __init__(self, timeout: float = 600, model: str = ''):
+    def __init__(self, timeout: float = 600, model: str = '', *, proxy_mode: str = 'environment', proxy_url: str = ''):
+        validate_proxy(proxy_mode, proxy_url)
         self.timeout = timeout
         self.model = model.strip()
+        self.proxy_mode = proxy_mode
+        self.proxy_url = proxy_url
 
     def complete(
         self,
@@ -46,6 +50,18 @@ class CodexClient:
             if self.model:
                 command.extend(['--model', self.model])
             command.append('-')
+            env = None
+            if self.proxy_mode != 'environment':
+                env = os.environ.copy()
+                for key in list(env):
+                    if key.lower() in {'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}:
+                        del env[key]
+                if self.proxy_mode == 'manual':
+                    for key in ('HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy'):
+                        env[key] = self.proxy_url
+                    env['NO_PROXY'] = env['no_proxy'] = ''
+                else:
+                    env['NO_PROXY'] = env['no_proxy'] = '*'
             result = subprocess.run(
                 command,
                 input=prompt,
@@ -56,6 +72,7 @@ class CodexClient:
                 timeout=self.timeout,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                 check=False,
+                env=env,
             )
         except FileNotFoundError as exc:
             raise LlmError('未找到 Codex CLI，请检查安装和 PATH') from exc

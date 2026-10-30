@@ -86,13 +86,15 @@ class ApplicationContext:
         config = self.config_for_account(account_id)
         connection = config.current_connection() if config.connections else None
         provider = connection.kind if connection else config.provider
+        proxy_options = ({'proxy_mode': connection.proxy_mode, 'proxy_url': connection.proxy_url}
+                         if connection and connection.proxy_mode != 'environment' else {})
         if provider == "codex":
-            client = CodexClient(model=connection.model if connection else '')
+            client = CodexClient(model=connection.model if connection else '', **proxy_options)
         elif provider == "api":
             api_key = self.secrets.get_api_key(connection.id) if connection else self.secrets.get_api_key()
             if not api_key:
                 raise ValueError("请先在设置中填写大模型 API Key")
-            client = OpenAICompatibleClient(connection.base_url if connection else config.api_base_url, connection.model if connection else config.model, api_key)
+            client = OpenAICompatibleClient(connection.base_url if connection else config.api_base_url, connection.model if connection else config.model, api_key, **proxy_options)
         else:
             raise ValueError("无效的大模型服务")
         return PublishingPipeline(
