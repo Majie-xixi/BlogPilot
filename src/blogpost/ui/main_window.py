@@ -1098,6 +1098,7 @@ class MainWindow:
         self.run_button.configure(state="normal")
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
+        self.hero_title_var.set("任务已结束")
         self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
         self._complete_progress(self.progress_var.get())
         self.refresh()
@@ -1123,6 +1124,7 @@ class MainWindow:
         success = sum(result.status == RunStatus.PUBLISHED for _account, result in results)
         failed = sum(result.status in {RunStatus.FAILED, RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW} for _account, result in results)
         skipped = len(results) - success - failed
+        self.hero_title_var.set("批量任务已结束")
         self.progress_var.set(f"批量任务完成 · 成功 {success} · 失败/待处理 {failed} · 跳过 {skipped}")
         self._complete_progress(self.progress_var.get())
         self.refresh()

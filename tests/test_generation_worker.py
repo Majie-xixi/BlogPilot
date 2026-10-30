@@ -5,12 +5,28 @@ import unittest
 from unittest.mock import Mock
 
 from blogpost.config import AppConfig
-from blogpost.domain import RunStatus
+from blogpost.domain import PublishResult, RunStatus
 from blogpost.pipeline import PublishingPipeline
 from blogpost.ui.main_window import MainWindow
 
 
 class GenerationWorkerTests(unittest.TestCase):
+    def test_skipped_run_does_not_claim_generation_is_running(self):
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        window = MainWindow.__new__(MainWindow)
+        window.running = True
+        window.run_button = ttk.Button(root)
+        window.batch_button = ttk.Button(root)
+        window.hero_title_var = tk.StringVar(root, value='正在生成今天的 AI 技术博文')
+        window.progress_var = tk.StringVar(root)
+        window._complete_progress = Mock()
+        window.refresh = Mock()
+        window._finish_run(PublishResult(RunStatus.SKIPPED, message='另一个生成发布任务正在运行'))
+        self.assertNotIn('正在生成', window.hero_title_var.get())
+        self.assertIn('已跳过', window.progress_var.get())
+
     def test_pipeline_exception_finishes_ui_and_restores_buttons(self):
         root = tk.Tk()
         root.withdraw()
@@ -22,6 +38,7 @@ class GenerationWorkerTests(unittest.TestCase):
         window.run_button = ttk.Button(root, text="生成中…", state="disabled")
         window.batch_button = ttk.Button(root, state="disabled")
         window.progress_var = tk.StringVar(root)
+        window.hero_title_var = tk.StringVar(root)
         window._complete_progress = Mock()
         window.refresh = Mock()
         window._show_task_failure = Mock()
