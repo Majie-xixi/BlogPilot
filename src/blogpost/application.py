@@ -24,6 +24,7 @@ from blogpost.repositories import Repository
 from blogpost.run_lock import RunLock
 from blogpost.scheduler import WindowsTaskScheduler
 from blogpost.secrets import DpapiSecretStore
+from blogpost.sensitive_words import effective_sensitive_words, scan_sensitive_hits
 from blogpost.markdown import parse_markdown
 from blogpost.network import internet_connection_status, is_metered_connection
 
@@ -78,6 +79,13 @@ class ApplicationContext:
             account.personal_category,
         )
 
+    def sensitive_word_table(self) -> dict[str, str]:
+        local = {
+            str(row["term"]): row["replacement"]
+            for row in self.repository.list_sensitive_words()
+        }
+        return effective_sensitive_words(local)
+
     def build_pipeline(self, account_id: str = DEFAULT_ACCOUNT_ID) -> PublishingPipeline:
         api_key = self.secrets.get_api_key()
         if not api_key:
@@ -106,6 +114,7 @@ class ApplicationContext:
                 config.min_chinese_chars,
                 config.title_similarity_threshold,
                 config.content_similarity_threshold,
+                sensitive_words=self.sensitive_word_table(),
             ),
             ModelReviewer(client),
             ArticleRewriter(client),
@@ -196,6 +205,12 @@ class ApplicationContext:
         document = parse_markdown(payload)
         if not document.title or document.chinese_chars < self.config.min_chinese_chars:
             raise ValueError("已保存文章未通过标题或最低字数检查")
+        blocked = scan_sensitive_hits(payload, self.sensitive_word_table())
+        if blocked:
+            raise ValueError(
+                f"已保存的文章包含词库中的敏感词：{'、'.join(blocked)}；"
+                "为避免账号被平台拦截，请人工调整文章后再重发"
+            )
         account = self.account(account_id)
         config = self.config_for_account(account_id)
         run = None
@@ -208,6 +223,8 @@ class ApplicationContext:
                     account.category,
                     config.dry_run,
                 )
+                if result.sensitive_term:
+                    self.repository.record_sensitive_word(result.sensitive_term)
                 if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
                     self.repository.update_run(
                         run.id,

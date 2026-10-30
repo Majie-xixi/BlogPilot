@@ -147,3 +147,4 @@ class PublishResult:
     url: str | None = None
     message: str | None = None
     article_path: str | None = None
+    sensitive_term: str | None = None
