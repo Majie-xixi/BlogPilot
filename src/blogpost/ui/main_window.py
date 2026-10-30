@@ -121,6 +121,110 @@ def resolve_today_status(
     return "状态未知"
 
 
+PUBLISH_SUCCESS_AUTO_CLOSE_MS = 60_000
+
+
+def _drop_topmost(dialog: tk.Toplevel) -> None:
+    try:
+        if dialog.winfo_exists():
+            dialog.attributes("-topmost", False)
+    except tk.TclError:
+        pass
+
+
+def _recover_hidden_dialog(root: tk.Misc, dialog: tk.Toplevel) -> None:
+    """主窗口可见而弹窗不可见（被最小化带走、落到屏幕外）时恢复弹窗并放开 grab。
+
+    grab 会把应用其余窗口的输入全部导向弹窗；弹窗一旦不可见，主窗口就表现
+    为无响应。此时宁可失去模态，也不能锁死整个应用。
+    """
+    try:
+        if not root.winfo_viewable() or not dialog.winfo_exists():
+            return
+        width, height = dialog.winfo_width(), dialog.winfo_height()
+        x, y = dialog.winfo_rootx(), dialog.winfo_rooty()
+        off_screen = (
+            x + width <= 0
+            or y + height <= 0
+            or x >= root.winfo_screenwidth()
+            or y >= root.winfo_screenheight()
+        )
+        if not off_screen and dialog.winfo_viewable():
+            return
+        dialog.geometry(
+            f"+{root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)}"
+            f"+{root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)}"
+        )
+        dialog.deiconify()
+        dialog.lift()
+        dialog.attributes("-topmost", True)
+        dialog.after(300, lambda: _drop_topmost(dialog))
+        dialog.grab_release()
+    except tk.TclError:
+        pass
+
+
+def present_modal_dialog(
+    root: tk.Misc,
+    dialog: tk.Toplevel,
+    *,
+    auto_close_ms: int | None = None,
+) -> None:
+    """以安全方式显示需要用户知悉的模态弹窗。
+
+    显示时确保主窗口还原、弹窗短暂置顶，避免弹窗在其他窗口后面或随最小化
+    藏起来后 grab 仍锁着输入；之后每秒看护一次。auto_close_ms 用于纯告知类
+    弹窗（如发布成功），无人查看时自动关闭。
+    """
+    try:
+        root.deiconify()
+        root.lift()
+    except tk.TclError:
+        pass
+    dialog.transient(root)
+    dialog.lift()
+    dialog.attributes("-topmost", True)
+    dialog.after(300, lambda: _drop_topmost(dialog))
+    dialog.grab_set()
+    dialog.focus_force()
+
+    def watch() -> None:
+        try:
+            if not dialog.winfo_exists():
+                return
+            _recover_hidden_dialog(root, dialog)
+            dialog.after(1000, watch)
+        except tk.TclError:
+            return
+
+    dialog.after(1000, watch)
+
+    if auto_close_ms is None:
+        return
+
+    def auto_close() -> None:
+        try:
+            if not dialog.winfo_exists():
+                return
+            dialog.grab_release()
+            dialog.withdraw()
+        except tk.TclError:
+            return
+
+        def final_destroy() -> None:
+            try:
+                if dialog.winfo_exists():
+                    dialog.destroy()
+            except tk.TclError:
+                pass
+
+        # 事件分发过程中直接销毁 topmost/transient 窗口可能使 Tk 崩溃，
+        # 先隐藏，等下一轮事件循环再销毁。
+        dialog.after_idle(final_destroy)
+
+    dialog.after(auto_close_ms, auto_close)
+
+
 def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
     """Convert a plain file log into the same visual entry used for live logs."""
     match = re.match(
@@ -1146,8 +1250,7 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(10, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(10, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(self.root, dialog)
 
     def _show_publish_success(self, url: str | None) -> None:
         dialog = tk.Toplevel(self.root)
@@ -1211,8 +1314,11 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(
+            self.root,
+            dialog,
+            auto_close_ms=PUBLISH_SUCCESS_AUTO_CLOSE_MS,
+        )
 
     def _show_task_failure(self, message: str, *, uncertain: bool = False) -> None:
         dialog = tk.Toplevel(self.root)
@@ -1269,8 +1375,7 @@ class MainWindow:
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_force()
+        present_modal_dialog(self.root, dialog)
 
     def open_profile(self) -> None:
         url = self.current_account.profile_url or "https://blog.51cto.com/"
