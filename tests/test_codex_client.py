@@ -1,13 +1,43 @@
 import subprocess
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from blogpost.llm.client import LlmError
-from blogpost.llm.codex import CodexClient
+from blogpost.llm.codex import CodexClient, find_codex
 
 
 class CodexClientTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows desktop installation')
+    def test_desktop_codex_is_used_when_missing_from_path(self):
+        with tempfile.TemporaryDirectory(dir='.') as root:
+            executable = Path(root) / 'OpenAI' / 'Codex' / 'bin' / 'version' / 'codex.exe'
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(root).resolve()), 'PATH': ''}):
+                with patch('blogpost.llm.codex.subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout='OK', stderr='')) as run:
+                    self.assertEqual(CodexClient().complete([{'role': 'user', 'content': 'hello'}]), 'OK')
+                    self.assertEqual(Path(run.call_args.args[0][0]), executable.resolve())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows desktop installation')
+    def test_latest_desktop_binary_is_used_and_path_takes_priority(self):
+        with tempfile.TemporaryDirectory(dir='.') as root:
+            bin_dir = Path(root).resolve() / 'OpenAI' / 'Codex' / 'bin'
+            older = bin_dir / 'old' / 'codex.exe'
+            newer = bin_dir / 'new' / 'codex.exe'
+            for executable in (older, newer):
+                executable.parent.mkdir(parents=True)
+                executable.touch()
+            os.utime(older, (1000000000, 1000000000))
+            os.utime(newer, (1100000000, 1100000000))
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(root).resolve()), 'PATH': ''}):
+                self.assertEqual(find_codex(), str(newer))
+                with patch('blogpost.llm.codex.shutil.which', return_value='C:\\custom\\codex.exe'):
+                    self.assertEqual(find_codex(), 'C:\\custom\\codex.exe')
+
     @patch('blogpost.llm.codex.subprocess.run')
     def test_optional_model_is_passed_to_codex(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, stdout='OK', stderr='')

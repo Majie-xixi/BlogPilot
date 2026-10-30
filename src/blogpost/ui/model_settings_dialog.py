@@ -13,7 +13,7 @@ from uuid import uuid4
 from blogpost.config import ModelConnection
 from blogpost.freellmapi import FreeLLMAPIError, FreeLLMAPIService, VERSION as FREELLMAPI_VERSION
 from blogpost.llm.client import OpenAICompatibleClient
-from blogpost.llm.codex import CodexClient
+from blogpost.llm.codex import CodexClient, find_codex
 from blogpost.paths import config_path
 from blogpost.ui.settings_state import SettingsState
 from blogpost.ui.theme import COLORS, FONT
@@ -253,7 +253,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(self.content, text='本地客户端' if c.kind == 'codex' else 'API（OpenAI 兼容）', style='DialogText.TLabel').grid(row=3, column=1, sticky='w', pady=(18, 0))
         if c.kind == 'codex':
             ttk.Label(self.content, text='使用本机 Codex CLI 的登录与模型配置。请先安装并登录 Codex；定时任务也需要在相同运行环境中可用。', style='DialogText.TLabel', wraplength=440).grid(row=4, column=1, sticky='w', pady=(12, 0))
-            ttk.Label(self.content, text='客户端：' + ('已找到' if shutil.which('codex') else '未找到'), style='CardDetail.TLabel').grid(row=5, column=1, sticky='w', pady=(10, 0))
+            ttk.Label(self.content, text='客户端：' + ('已找到' if find_codex() else '未找到'), style='CardDetail.TLabel').grid(row=5, column=1, sticky='w', pady=(10, 0))
             self._field(8, '指定模型', 'model')
             ttk.Label(self.content, text='留空使用 Codex CLI 的配置；填写后测试和文章生成均使用此模型。', style='CardDetail.TLabel', wraplength=440).grid(row=9, column=1, sticky='w', pady=(4, 0))
             RoundedButton(self.content, text='测试连接', command=self._test).grid(row=13, column=1, sticky='w', pady=(12, 0))

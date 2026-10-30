@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import subprocess
+import os
+import shutil
+from pathlib import Path
 
 from blogpost.llm.client import LlmError
+
+
+def find_codex() -> str | None:
+    executable = shutil.which('codex')
+    if executable:
+        return executable
+    if os.name != 'nt' or not os.environ.get('LOCALAPPDATA'):
+        return None
+    desktop_bin = Path(os.environ['LOCALAPPDATA']) / 'OpenAI' / 'Codex' / 'bin'
+    try:
+        candidates = [path for path in desktop_bin.glob('*/codex.exe') if path.is_file()]
+        return str(max(candidates, key=lambda path: path.stat().st_mtime_ns)) if candidates else None
+    except OSError:
+        return None
 
 
 class CodexClient:
@@ -25,7 +42,7 @@ class CodexClient:
             f"[{message['role']}]\n{message['content']}" for message in messages
         )
         try:
-            command = ['codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check']
+            command = [find_codex() or 'codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check']
             if self.model:
                 command.extend(['--model', self.model])
             command.append('-')
