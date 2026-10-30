@@ -277,6 +277,7 @@ class MainWindow:
         self._status_card(stats, 2, "发布模式", self.mode_value_var, self.mode_detail_var, COLORS["warning"])
 
         hero_panel = RoundedPanel(page, radius=12, padding=(18, 14))
+        self.hero_panel = hero_panel
         hero_panel.grid(row=2, column=0, sticky="ew")
         hero = hero_panel.content
         hero.columnconfigure(0, weight=1)
@@ -875,6 +876,11 @@ class MainWindow:
         self.progress_pct_var.set("已等待 0 秒")
         self.progressbar.grid_remove()
         self.progress_frame.grid()
+        self._resize_hero()
+
+    def _resize_hero(self) -> None:
+        self.hero_panel.content.update_idletasks()
+        self.hero_panel._content_resized()
 
     def _update_stage_progress(self, status: RunStatus, message: str) -> None:
         percent = STATUS_PROGRESS.get(status, 5)
@@ -892,6 +898,7 @@ class MainWindow:
         if self.running:
             return
         self.progress_frame.grid_remove()
+        self._resize_hero()
         self.hero_title_var.set("准备生成今天的 AI 技术博文")
         self.progress_var.set("准备就绪 · 点击右侧按钮即可开始")
         self.run_button.configure(text="立即生成并发布 →")
@@ -1171,6 +1178,7 @@ class MainWindow:
         if getattr(self, 'cancellation', None) is not None:
             self.cancel_button.grid_remove()
             self.cancellation = None
+            self._resize_hero()
         self.run_button.configure(state="normal")
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
@@ -1196,6 +1204,7 @@ class MainWindow:
         self.running = False
         self.cancel_button.grid_remove()
         self.cancellation = None
+        self._resize_hero()
         self.run_button.configure(state="normal")
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
