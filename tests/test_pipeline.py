@@ -176,3 +176,22 @@ class PipelineTests(unittest.TestCase):
         run = next(iter(self.repo.recent_runs(1)))
         self.assertEqual(run.status, RunStatus.PUBLISHED)
         self.assertIsNotNone(run.finished_at)
+
+    def test_sensitive_term_from_review_dialog_is_recorded(self):
+        class ReviewPublisher:
+            def publish(self, article, category, dry_run):
+                return PublishResult(
+                    RunStatus.UNKNOWN,
+                    message="已自动确认继续发布，文章正在等待 51CTO 审核（平台提示：外链挂马）",
+                    sensitive_term="外链挂马",
+                )
+
+        self.pipeline.publisher = ReviewPublisher()
+
+        result = self.pipeline.run(Trigger.MANUAL)
+
+        self.assertEqual(result.status, RunStatus.UNKNOWN)
+        words = self.repo.list_sensitive_words()
+        self.assertEqual(len(words), 1)
+        self.assertEqual(words[0]["term"], "外链挂马")
+        self.assertEqual(words[0]["hit_count"], 1)

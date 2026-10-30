@@ -201,6 +201,8 @@ class PublishingPipeline:
                     self.repository.update_run(run.id, RunStatus.PUBLISHING, article_id=article_id)
                     emit(RunStatus.PUBLISHING, "正在填充 51CTO 编辑器")
                     result = self.publisher.publish(article, self.config.category, self.config.dry_run)
+                    if result.sensitive_term:
+                        self.repository.record_sensitive_word(result.sensitive_term)
                     if result.status in {RunStatus.PUBLISHED, RunStatus.UNKNOWN, RunStatus.FAILED}:
                         self.repository.update_run(
                             run.id,

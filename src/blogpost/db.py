@@ -39,6 +39,7 @@ class Database:
                 (datetime.now().isoformat(),),
             )
             self._migrate_multi_account(connection)
+            self._migrate_sensitive_words(connection)
 
     @staticmethod
     def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
@@ -77,5 +78,17 @@ class Database:
         )
         connection.execute(
             "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(3, ?)",
+            (datetime.now().isoformat(),),
+        )
+
+    def _migrate_sensitive_words(self, connection: sqlite3.Connection) -> None:
+        migration = (
+            files("blogpost.migrations")
+            .joinpath("004_sensitive_words.sql")
+            .read_text(encoding="utf-8")
+        )
+        connection.executescript(migration)
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(4, ?)",
             (datetime.now().isoformat(),),
         )

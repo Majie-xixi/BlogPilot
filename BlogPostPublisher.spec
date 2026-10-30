@@ -8,6 +8,7 @@ a = Analysis(
         ('src/blogpost/migrations/001_initial.sql', 'blogpost/migrations'),
         ('src/blogpost/migrations/002_multi_account.sql', 'blogpost/migrations'),
         ('src/blogpost/migrations/003_account_article_type.sql', 'blogpost/migrations'),
+        ('src/blogpost/data/sensitive_words.txt', 'blogpost/data'),
     ],
     hiddenimports=['tkinter', 'sqlite3'],
     hookspath=[],
