@@ -95,6 +95,7 @@ class WindowsTaskScheduler:
             encoding="utf-8",
             errors="replace",
             timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "Windows 计划任务操作失败")
