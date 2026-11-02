@@ -13,6 +13,7 @@ from blogpost.domain import Article, PublishResult, RunStatus
 from blogpost.publishers.diagnostics import save_diagnostic
 from blogpost.publishers.cto51_profile import ProfileSnapshot, fetch_profile_snapshot
 from blogpost.publishers.personal_categories import CategoryClient, CategoryError, ensure_personal_category
+from blogpost.sensitive_words import clean_captured_term
 
 
 PUBLISH_URL = "https://blog.51cto.com/blogger/publish"
@@ -483,6 +484,7 @@ class Cto51Publisher:
                         f"已自动确认继续发布，文章正在等待 51CTO 审核{term_detail}；"
                         "为防止重复，软件不会自动重试"
                     ),
+                    sensitive_term=clean_captured_term(term) or None,
                 )
             state = session.evaluate("({url:location.href,text:document.body?.innerText||''})") or {}
             url = state.get("url", "")

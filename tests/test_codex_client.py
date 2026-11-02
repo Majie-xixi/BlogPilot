@@ -93,6 +93,7 @@ class CodexConfigTests(unittest.TestCase):
                                   category='', profile_url='', article_type='', content_directions='', keywords='',
                                   secondary_category='', personal_category='')
         repository = Mock(); repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         ApplicationContext(cfg, repository, Mock(), Mock(), Mock(), Mock()).build_pipeline()
         client = pipeline.call_args.args[3].client
         self.assertEqual((client.proxy_mode, client.proxy_url), ('manual', 'http://127.0.0.1:7890'))
@@ -107,6 +108,7 @@ class CodexConfigTests(unittest.TestCase):
         cfg = AppConfig(connections=[ModelConnection('codex', 'Codex', 'codex', model='selected-model')], active_connection_id='codex')
         account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
         repository = Mock(); repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         ApplicationContext(cfg, repository, Mock(), Mock(), Mock(), Mock()).build_pipeline()
         self.assertEqual(pipeline.call_args.args[3].client.model, 'selected-model')
 
@@ -135,6 +137,7 @@ class CodexConfigTests(unittest.TestCase):
                                   secondary_category='', personal_category='')
         repository = Mock()
         repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         secrets = Mock()
         context = ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock())
         context.build_pipeline()

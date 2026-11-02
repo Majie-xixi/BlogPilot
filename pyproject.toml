@@ -20,4 +20,4 @@ blogpost-publisher-gui = "blogpost.ui.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-blogpost = ["migrations/*.sql"]
+blogpost = ["migrations/*.sql", "data/*.txt"]

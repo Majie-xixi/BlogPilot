@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from hashlib import sha256
 import re
 
 from blogpost.corpus import CorpusItem
 from blogpost.domain import QualityIssue, QualityReport
 from blogpost.markdown import parse_markdown
+from blogpost.sensitive_words import load_builtin_words
 from blogpost.similarity import text_similarity, title_similarity
 
 
@@ -17,20 +19,6 @@ _SECRET = re.compile(
     r"(?i)(?:api[_-]?key|authorization|password|secret)\s*[=:]\s*\S+|\bsk-[A-Za-z0-9_-]{6,}"
 )
 _DANGEROUS_HTML = re.compile(r"<\s*(script|iframe|object|embed)\b", re.IGNORECASE)
-_PLATFORM_SENSITIVE_WORDING = {
-    "漏洞": "风险缺口或薄弱点",
-    "黑客": "高风险参与者",
-    "攻击": "对抗行为或异常请求",
-    "入侵": "未授权访问",
-    "破解": "非授权解析",
-    "木马": "恶意程序",
-    "病毒": "恶意程序",
-    "勒索": "恶意加密事件",
-    "窃取": "非授权获取",
-    "绕过": "规避",
-    "渗透": "安全验证",
-    "提权": "权限异常提升",
-}
 
 
 class QualityGate:
@@ -39,10 +27,14 @@ class QualityGate:
         min_chinese_chars: int = 800,
         title_threshold: float = 0.76,
         content_threshold: float = 0.68,
+        sensitive_words: Mapping[str, str] | None = None,
     ):
         self.min_chinese_chars = min_chinese_chars
         self.title_threshold = title_threshold
         self.content_threshold = content_threshold
+        self.sensitive_words: dict[str, str] = (
+            dict(sensitive_words) if sensitive_words is not None else load_builtin_words()
+        )
 
     def check(self, markdown: str, corpus: list[CorpusItem]) -> QualityReport:
         document = parse_markdown(markdown)
@@ -62,11 +54,13 @@ class QualityGate:
         if _DANGEROUS_HTML.search(markdown):
             issues.append(QualityIssue("dangerous_html", "文章包含危险 HTML"))
         sensitive_terms = [
-            term for term in _PLATFORM_SENSITIVE_WORDING if term in markdown
+            term for term in self.sensitive_words if term and term in markdown
         ]
         if sensitive_terms:
             suggestions = "；".join(
-                f"“{term}”改为“{_PLATFORM_SENSITIVE_WORDING[term]}”"
+                f"“{term}”改为“{self.sensitive_words[term]}”"
+                if self.sensitive_words[term]
+                else f"“{term}”改用中性专业表达"
                 for term in sensitive_terms
             )
             issues.append(

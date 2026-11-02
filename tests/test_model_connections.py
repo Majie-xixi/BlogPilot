@@ -169,6 +169,7 @@ class ModelConnectionTests(unittest.TestCase):
         cfg = AppConfig(connections=[ModelConnection('other', 'OpenAI', 'api', 'OpenAI', 'https://example.test/v1', 'model-b')], active_connection_id='other')
         account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
         repository = Mock(); repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         secrets = Mock(); secrets.get_api_key.return_value = 'key-b'
         ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock()).build_pipeline()
         secrets.get_api_key.assert_called_once_with('other')
@@ -183,6 +184,7 @@ class ModelConnectionTests(unittest.TestCase):
         cfg = AppConfig(connections=[ModelConnection('api', 'API', 'api', base_url='https://example.test/v1', model='m', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')], active_connection_id='api')
         account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
         repository = Mock(); repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         secrets = Mock(); secrets.get_api_key.return_value = 'key'
         ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock()).build_pipeline()
         client.assert_called_once_with('https://example.test/v1', 'm', 'key', proxy_mode='manual', proxy_url='http://127.0.0.1:7890')
@@ -195,6 +197,7 @@ class ModelConnectionTests(unittest.TestCase):
         cfg = AppConfig.from_json_dict({'provider': 'codex'})
         account = SimpleNamespace(enabled=True, article_subdir='default', schedule_time=cfg.schedule_time, category='', profile_url='', article_type='', content_directions='', keywords='', secondary_category='', personal_category='')
         repository = Mock(); repository.get_account.return_value = account
+        repository.list_sensitive_words.return_value = []
         secrets = Mock()
         ApplicationContext(cfg, repository, secrets, Mock(), Mock(), Mock()).build_pipeline()
         secrets.get_api_key.assert_not_called()

@@ -317,6 +317,37 @@ class Repository:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def list_sensitive_words(self) -> list[dict]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT term,replacement,source,hit_count,last_hit_at,created_at
+                FROM local_sensitive_words
+                ORDER BY hit_count DESC, created_at, term"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_sensitive_word(
+        self,
+        term: str,
+        replacement: str | None = None,
+        *,
+        source: str = "auto",
+    ) -> None:
+        term = term.strip()
+        if not term:
+            return
+        with self.database.connect() as connection:
+            connection.execute(
+                """INSERT INTO local_sensitive_words
+                (term,replacement,source,hit_count,last_hit_at,created_at)
+                VALUES(?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
+                ON CONFLICT(term) DO UPDATE SET
+                    hit_count = hit_count + 1,
+                    last_hit_at = datetime('now','localtime'),
+                    replacement = COALESCE(excluded.replacement, local_sensitive_words.replacement)""",
+                (term, (replacement or "").strip() or None, source, 1),
+            )
+
     def list_accounts(self, *, enabled_only: bool = False) -> list[Account]:
         query = "SELECT * FROM accounts"
         params: tuple[object, ...] = ()
