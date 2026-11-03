@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from datetime import time
 import json
+import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class ConfigError(ValueError):
@@ -15,6 +17,38 @@ DEFAULT_API_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-pro"
 LEGACY_API_BASE_URL = "https://api.deepseek.com/v1"
 LEGACY_MODEL = "deepseek-chat"
+
+
+@dataclass(slots=True)
+class ModelConnection:
+    id: str
+    name: str
+    kind: str
+    vendor: str = ""
+    base_url: str = ""
+    model: str = ""
+    proxy_mode: str = "environment"
+    proxy_url: str = ""
+
+
+def validate_proxy(mode: str, address: str) -> None:
+    if mode not in {'environment', 'manual', 'direct'}:
+        raise ConfigError('代理模式无效')
+    if not address:
+        if mode == 'manual':
+            raise ConfigError('手动代理需要填写 HTTP 地址和端口')
+        return
+    try:
+        parsed = urlsplit(address)
+        valid = (address == address.strip() and parsed.scheme.lower() == 'http'
+                 and bool(parsed.hostname) and parsed.port is not None and 1 <= parsed.port <= 65535
+                 and parsed.username is None and parsed.password is None
+                 and parsed.path in ('', '/') and not parsed.query and not parsed.fragment
+                 and not any(ch.isspace() for ch in address))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ConfigError('代理地址须为不含账号密码的 HTTP 地址和端口，例如 http://127.0.0.1:7890')
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -34,6 +68,9 @@ class AppConfig:
     schedule_time: time = time(10, 0)
     api_base_url: str = DEFAULT_API_BASE_URL
     model: str = DEFAULT_MODEL
+    provider: str = "api"
+    connections: list[ModelConnection] = field(default_factory=list)
+    active_connection_id: str = ""
     category: str = "AI 智能体"
     profile_url: str = ""
     dry_run: bool = True
@@ -54,14 +91,45 @@ class AppConfig:
             raise ConfigError("invalid schedule time")
 
     def validate_for_run(self) -> None:
-        if not self.model.strip():
-            raise ConfigError("model is required")
-        if not self.api_base_url.strip():
-            raise ConfigError("API base URL is required")
+        if self.connections:
+            connection = self.current_connection()
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
+            if connection.kind not in {"api", "codex"}:
+                raise ConfigError("invalid model provider")
+            if connection.kind == "api" and (not connection.model.strip() or not connection.base_url.strip()):
+                raise ConfigError("API base URL and model are required")
+        else:
+            self._validate_legacy_model()
         if self.min_chinese_chars < 401:
             raise ConfigError("minimum article length must exceed 400")
         if self.profile_url and not self.profile_url.startswith("https://blog.51cto.com/u_"):
             raise ConfigError("51CTO profile URL must look like https://blog.51cto.com/u_123456")
+
+    def _validate_legacy_model(self) -> None:
+        if self.provider not in {"api", "codex"}:
+            raise ConfigError("invalid model provider")
+        if self.provider == "api":
+            if not self.model.strip():
+                raise ConfigError("model is required")
+            if not self.api_base_url.strip():
+                raise ConfigError("API base URL is required")
+
+    def current_connection(self) -> ModelConnection:
+        for connection in self.connections:
+            if connection.id == self.active_connection_id:
+                return connection
+        raise ConfigError("active model connection not found")
+
+    def ensure_connections(self) -> None:
+        if self.connections:
+            return
+        if self.provider not in {"api", "codex"}:
+            raise ConfigError("invalid model provider")
+        self.connections = [
+            ModelConnection("legacy-api", "DeepSeek" if "deepseek.com" in self.api_base_url else "API 服务", "api", "DeepSeek" if "deepseek.com" in self.api_base_url else "自定义", self.api_base_url, self.model),
+            ModelConnection("codex", "Codex CLI", "codex"),
+        ]
+        self.active_connection_id = "codex" if self.provider == "codex" else "legacy-api"
 
     def to_json_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -85,7 +153,12 @@ class AppConfig:
         if "schedule_time" in values and isinstance(values["schedule_time"], str):
             hour, minute = values["schedule_time"].split(":", 1)
             values["schedule_time"] = time(int(hour), int(minute))
-        return cls(**values)
+        if "connections" in values:
+            values["connections"] = [ModelConnection(**item) for item in values["connections"]]
+        cfg = cls(**values)
+        if "connections" not in values:
+            cfg.ensure_connections()
+        return cfg
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
@@ -102,7 +175,17 @@ class AppConfig:
         )
 
     def save(self, path: Path) -> None:
+        for connection in self.connections:
+            validate_proxy(connection.proxy_mode, connection.proxy_url)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            previous = json.loads(path.read_text(encoding='utf-8'))
+            old_connections = previous.get('connections', [])
+            needs_backup = (any('proxy_mode' not in item or 'proxy_url' not in item for item in old_connections)
+                            or ('connections' not in previous and bool(self.connections)))
+            backup = path.with_suffix(path.suffix + '.pre-proxy-settings.bak')
+            if needs_backup and not backup.exists():
+                shutil.copy2(path, backup)
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(
             json.dumps(self.to_json_dict(), ensure_ascii=False, indent=2),

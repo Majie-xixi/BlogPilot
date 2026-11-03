@@ -59,6 +59,45 @@ class FakePublisher:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_cancel_during_planning_stops_before_generation_and_publish(self):
+        from blogpost.pipeline import Cancellation
+        cancellation = Cancellation()
+        original = self.pipeline.planner.choose
+        def choose(*args):
+            result = original(*args)
+            self.assertTrue(cancellation.cancel())
+            return result
+        self.pipeline.planner.choose = choose
+        result = self.pipeline.run(Trigger.MANUAL, cancellation=cancellation)
+        self.assertEqual(result.status, RunStatus.SKIPPED)
+        self.assertIn('取消', result.message)
+        self.assertEqual(self.publisher.calls, 0)
+        self.assertFalse(list(self.cfg.generated_dir.glob('*.md')))
+
+    def test_cannot_claim_cancel_during_publish(self):
+        from blogpost.pipeline import Cancellation
+        cancellation = Cancellation()
+        def publish(*args):
+            self.assertFalse(cancellation.cancel())
+            return PublishResult(RunStatus.PUBLISHED)
+        self.publisher.publish = publish
+        result = self.pipeline.run(Trigger.MANUAL, cancellation=cancellation)
+        self.assertEqual(result.status, RunStatus.PUBLISHED)
+
+    def test_cancel_after_save_preserves_article_and_never_publishes(self):
+        from blogpost.pipeline import Cancellation
+        cancellation = Cancellation()
+        original = self.pipeline.article_store.save
+        def save(*args):
+            stored = original(*args)
+            self.assertTrue(cancellation.cancel())
+            return stored
+        self.pipeline.article_store.save = save
+        result = self.pipeline.run(Trigger.MANUAL, cancellation=cancellation)
+        self.assertEqual(result.status, RunStatus.SKIPPED)
+        self.assertEqual(self.publisher.calls, 0)
+        self.assertEqual(len(list(self.cfg.generated_dir.glob('*.md'))), 1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)

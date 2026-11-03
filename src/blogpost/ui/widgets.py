@@ -250,11 +250,11 @@ class NetworkStatusIcon(tk.Canvas):
     def _show_tooltip(self, _event=None) -> None:
         self._hide_tooltip()
         message = (
-            "网络正常"
+            "系统网络已连接；模型服务和 51CTO 状态请分别查看"
             if self._status is True
-            else "网络不可用，请检查网络连接"
+            else "系统网络不可用，请检查网络连接"
             if self._status is False
-            else "正在检查网络状态"
+            else "系统网络状态未确定"
         )
         tooltip = tk.Toplevel(self)
         self._tooltip = tooltip

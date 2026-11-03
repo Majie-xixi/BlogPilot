@@ -70,8 +70,15 @@ class TopicPlanner:
             temperature=0.8,
             json_mode=True,
         )
-        data = json.loads(_strip_fence(raw))
+        try:
+            data = json.loads(_strip_fence(raw))
+        except json.JSONDecodeError as exc:
+            raise ValueError('模型返回的选题格式无效，请重新测试模型连接后重试') from exc
+        if not isinstance(data, dict) or not isinstance(data.get('candidates'), list):
+            raise ValueError('模型返回的选题格式无效，请重新测试模型连接后重试')
         for candidate in data.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
             topic = Topic(
                 str(candidate.get("title", "")).strip(),
                 str(candidate.get("summary", "")).strip(),

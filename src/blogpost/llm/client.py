@@ -4,7 +4,10 @@ import json
 import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
+
+from blogpost.config import validate_proxy
 
 
 class LlmError(RuntimeError):
@@ -38,6 +41,22 @@ def _urllib_transport(
         return json.loads(response.read().decode("utf-8"))
 
 
+class _ManualProxyHandler(ProxyHandler):
+    def proxy_open(self, request, proxy, proxy_type):
+        # Manual mode is explicit, so do not apply system NO_PROXY rules.
+        request.set_proxy(urlsplit(proxy).netloc, request.type)
+        return None
+
+
+def _proxy_transport(mode: str, address: str) -> Transport:
+    opener = build_opener(_ManualProxyHandler({'http': address, 'https': address}) if mode == 'manual' else ProxyHandler({}))
+    def request(url, headers, payload, timeout):
+        req = Request(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers=headers, method='POST')
+        with opener.open(req, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    return request
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -48,13 +67,16 @@ class OpenAICompatibleClient:
         timeout: float = 90,
         max_retries: int = 2,
         transport: Transport | None = None,
+        proxy_mode: str = 'environment',
+        proxy_url: str = '',
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
-        self.transport = transport or _urllib_transport
+        validate_proxy(proxy_mode, proxy_url)
+        self.transport = transport or (_urllib_transport if proxy_mode == 'environment' else _proxy_transport(proxy_mode, proxy_url))
 
     def complete(
         self,

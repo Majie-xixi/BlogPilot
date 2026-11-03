@@ -207,6 +207,7 @@ def _download_profile_html(url: str, timeout: float) -> str:
             encoding="utf-8",
             errors="replace",
             timeout=timeout + 5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
             raise ConnectionError(completed.stderr.strip() or "51CTO 主页读取失败")

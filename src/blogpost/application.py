@@ -14,10 +14,11 @@ from blogpost.corpus import CorpusIndexer
 from blogpost.db import Database
 from blogpost.domain import Account, Article, DEFAULT_ACCOUNT_ID, PublishResult, RunStatus, Trigger
 from blogpost.llm.client import OpenAICompatibleClient
+from blogpost.llm.codex import CodexClient
 from blogpost.llm.generation import ArticleGenerator, ArticleRewriter, TopicPlanner
 from blogpost.llm.review import ModelReviewer
 from blogpost.paths import app_data_dir, browser_profile_dir, config_path, database_path
-from blogpost.pipeline import PublishingPipeline
+from blogpost.pipeline import Cancelled, Cancellation, PublishingPipeline
 from blogpost.publishers.cto51 import Cto51Publisher
 from blogpost.quality import QualityGate
 from blogpost.repositories import Repository
@@ -87,18 +88,23 @@ class ApplicationContext:
         return effective_sensitive_words(local)
 
     def build_pipeline(self, account_id: str = DEFAULT_ACCOUNT_ID) -> PublishingPipeline:
-        api_key = self.secrets.get_api_key()
-        if not api_key:
-            raise ValueError("请先在设置中填写大模型 API Key")
         account = self.account(account_id)
         if not account.enabled:
             raise ValueError(f"账号“{account.display_name}”已停用")
         config = self.config_for_account(account_id)
-        client = OpenAICompatibleClient(
-            config.api_base_url,
-            config.model,
-            api_key,
-        )
+        connection = config.current_connection() if config.connections else None
+        provider = connection.kind if connection else config.provider
+        proxy_options = ({'proxy_mode': connection.proxy_mode, 'proxy_url': connection.proxy_url}
+                         if connection and connection.proxy_mode != 'environment' else {})
+        if provider == "codex":
+            client = CodexClient(model=connection.model if connection else '', **proxy_options)
+        elif provider == "api":
+            api_key = self.secrets.get_api_key(connection.id) if connection else self.secrets.get_api_key()
+            if not api_key:
+                raise ValueError("请先在设置中填写大模型 API Key")
+            client = OpenAICompatibleClient(connection.base_url if connection else config.api_base_url, connection.model if connection else config.model, api_key, **proxy_options)
+        else:
+            raise ValueError("无效的大模型服务")
         return PublishingPipeline(
             config,
             self.repository,
@@ -132,6 +138,7 @@ class ApplicationContext:
         allow_same_day: bool = False,
         due_only: bool = False,
         progress: AccountProgress | None = None,
+        cancellation: Cancellation | None = None,
     ) -> list[tuple[Account, PublishResult]]:
         selected = set(account_ids or [])
         now = datetime.now()
@@ -170,15 +177,25 @@ class ApplicationContext:
 
         results: list[tuple[Account, PublishResult]] = []
         for account in accounts:
+            if cancellation is not None:
+                try:
+                    cancellation.check()
+                except Cancelled:
+                    result = PublishResult(RunStatus.SKIPPED, message="已取消，未开始处理此账号")
+                    callback(account, result.status, result.message)
+                    results.append((account, result))
+                    continue
             callback(account, RunStatus.QUEUED, f"开始处理账号：{account.display_name}")
             try:
                 pipeline = self.build_pipeline(account.id)
+                options = {"cancellation": cancellation} if cancellation is not None else {}
                 result = pipeline.run(
                     trigger,
                     allow_same_day=allow_same_day,
                     progress=lambda status, message, current=account: callback(
                         current, status, message
                     ),
+                    **options,
                 )
             except Exception as exc:
                 result = PublishResult(RunStatus.FAILED, message=str(exc))

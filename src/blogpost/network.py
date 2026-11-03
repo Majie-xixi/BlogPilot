@@ -28,6 +28,7 @@ def internet_connection_status() -> bool | None:
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -61,6 +62,7 @@ def network_cost_type() -> str:
             encoding="utf-8",
             errors="replace",
             timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.TimeoutExpired):
         return "Unknown"

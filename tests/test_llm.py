@@ -9,6 +9,13 @@ from pathlib import Path
 
 
 class LlmTests(unittest.TestCase):
+    def test_invalid_topic_response_has_actionable_error(self):
+        class FakeClient:
+            def complete(self, messages, **kwargs):
+                return 'not json'
+        with self.assertRaisesRegex(ValueError, '选题.*格式'):
+            TopicPlanner(FakeClient()).choose([], 0.76, 0.68)
+
     def test_client_parses_chat_completion(self):
         def transport(url, headers, payload, timeout):
             return {

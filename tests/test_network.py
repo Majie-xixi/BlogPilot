@@ -7,6 +7,13 @@ from blogpost.network import internet_connection_status
 
 
 class NetworkStatusTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows console behavior')
+    def test_background_probe_does_not_open_console(self):
+        import subprocess
+        with patch('blogpost.network.subprocess.run', return_value=self._result('InternetAccess')) as run:
+            self.assertTrue(internet_connection_status())
+        self.assertEqual(run.call_args.kwargs.get('creationflags'), subprocess.CREATE_NO_WINDOW)
+
     def _result(self, stdout: str, returncode: int = 0):
         return SimpleNamespace(stdout=stdout, returncode=returncode)
 

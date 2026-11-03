@@ -5,6 +5,7 @@ import base64
 import ctypes
 from ctypes import wintypes
 import os
+import re
 from pathlib import Path
 from typing import Protocol
 
@@ -14,23 +15,23 @@ API_KEY_NAME = "model-api-key"
 
 
 class SecretStore(Protocol):
-    def get_api_key(self) -> str | None: ...
-    def set_api_key(self, value: str) -> None: ...
-    def delete_api_key(self) -> None: ...
+    def get_api_key(self, connection_id: str = "legacy-api") -> str | None: ...
+    def set_api_key(self, value: str, connection_id: str = "legacy-api") -> None: ...
+    def delete_api_key(self, connection_id: str = "legacy-api") -> None: ...
 
 
 @dataclass
 class MemorySecretStore:
     values: dict[str, str] = field(default_factory=dict)
 
-    def get_api_key(self) -> str | None:
-        return self.values.get(API_KEY_NAME)
+    def get_api_key(self, connection_id: str = "legacy-api") -> str | None:
+        return self.values.get(connection_id)
 
-    def set_api_key(self, value: str) -> None:
-        self.values[API_KEY_NAME] = value
+    def set_api_key(self, value: str, connection_id: str = "legacy-api") -> None:
+        self.values[connection_id] = value
 
-    def delete_api_key(self) -> None:
-        self.values.pop(API_KEY_NAME, None)
+    def delete_api_key(self, connection_id: str = "legacy-api") -> None:
+        self.values.pop(connection_id, None)
 
 
 class _DataBlob(ctypes.Structure):
@@ -76,21 +77,30 @@ class DpapiSecretStore:
     def __init__(self, path: Path):
         self.path = Path(path)
 
-    def get_api_key(self) -> str | None:
-        env_value = os.environ.get("BLOGPOST_API_KEY")
+    def _path_for(self, connection_id: str) -> Path:
+        if connection_id == "legacy-api":
+            return self.path
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", connection_id):
+            raise ValueError("invalid connection id")
+        return self.path.parent / "model-keys" / f"{connection_id}.bin"
+
+    def get_api_key(self, connection_id: str = "legacy-api") -> str | None:
+        env_value = os.environ.get("BLOGPOST_API_KEY") if connection_id == "legacy-api" else None
         if env_value:
             return env_value
-        if not self.path.exists():
+        path = self._path_for(connection_id)
+        if not path.exists():
             return None
-        encrypted = base64.b64decode(self.path.read_bytes())
+        encrypted = base64.b64decode(path.read_bytes())
         return _unprotect(encrypted).decode("utf-8")
 
-    def set_api_key(self, value: str) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def set_api_key(self, value: str, connection_id: str = "legacy-api") -> None:
+        path = self._path_for(connection_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
         encrypted = base64.b64encode(_protect(value.encode("utf-8")))
-        temp = self.path.with_suffix(".tmp")
+        temp = path.with_suffix(".tmp")
         temp.write_bytes(encrypted)
-        temp.replace(self.path)
+        temp.replace(path)
 
-    def delete_api_key(self) -> None:
-        self.path.unlink(missing_ok=True)
+    def delete_api_key(self, connection_id: str = "legacy-api") -> None:
+        self._path_for(connection_id).unlink(missing_ok=True)
