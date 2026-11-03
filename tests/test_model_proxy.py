@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import subprocess
@@ -32,6 +33,8 @@ class ProxyTests(unittest.TestCase):
                 pass
         with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as proxy:
             thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+            # 起线程前先回收 Tcl 循环垃圾，避免垂死线程跨线程销毁 Tcl 对象。
+            gc.collect()
             thread.start()
             try:
                 client = OpenAICompatibleClient('https://example.invalid/v1', 'm', 'key', max_retries=0,
@@ -40,6 +43,9 @@ class ProxyTests(unittest.TestCase):
                     client.complete([])
                 self.assertEqual(tunnels, ['example.invalid:443'])
             finally:
+                # 线程退出可能在垂死线程触发 GC，把此前 Tk 测试遗留的 Tcl 循环
+                # 垃圾在错误线程销毁导致崩溃；先在主线程回收。
+                gc.collect()
                 proxy.shutdown()
                 thread.join(timeout=5)
 
@@ -68,6 +74,8 @@ class ProxyTests(unittest.TestCase):
                 pass
         with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as target, ThreadingHTTPServer(('127.0.0.1', 0), Handler) as proxy:
             threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in (target, proxy)]
+            # 起线程前先回收 Tcl 循环垃圾，避免垂死线程跨线程销毁 Tcl 对象。
+            gc.collect()
             for thread in threads:
                 thread.start()
             try:
@@ -81,6 +89,8 @@ class ProxyTests(unittest.TestCase):
                             self.assertEqual(OpenAICompatibleClient(base, 'm', 'key').complete([]), 'OK')
                 self.assertEqual([port for port, _ in hits], [proxy.server_port, target.server_port, proxy.server_port])
             finally:
+                # 同上：先在主线程回收，避免垂死线程跨线程销毁 Tcl 对象。
+                gc.collect()
                 target.shutdown()
                 proxy.shutdown()
                 for thread in threads:

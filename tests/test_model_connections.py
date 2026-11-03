@@ -133,6 +133,7 @@ class ModelConnectionTests(unittest.TestCase):
             self.assertEqual([c.id for c in AppConfig.load(root / 'config.json').connections], ['freellmapi', 'codex'])
 
     def test_compatible_local_gateway_receives_chat_completions_and_json_mode(self):
+        import gc
         import json
         import threading
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -150,6 +151,9 @@ class ModelConnectionTests(unittest.TestCase):
                 pass
         server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
+        # 起线程前先回收：此前 Tk 测试遗留的 Tcl 循环垃圾若被垂死线程 GC
+        # 会跨线程销毁 Tcl 对象导致整个进程崩溃。
+        gc.collect()
         thread.start()
         try:
             client = OpenAICompatibleClient(f'http://127.0.0.1:{server.server_port}/v1', 'auto', 'fixture-key')
@@ -158,6 +162,9 @@ class ModelConnectionTests(unittest.TestCase):
             self.assertEqual(received[0][1], 'Bearer fixture-key')
             self.assertEqual(received[0][2]['response_format'], {'type': 'json_object'})
         finally:
+            # 线程退出可能在垂死线程触发 GC，把此前 Tk 测试遗留的 Tcl 循环
+            # 垃圾在错误线程销毁导致崩溃；先在主线程回收。
+            gc.collect()
             server.shutdown()
             server.server_close()
             thread.join()
