@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -126,6 +126,50 @@ class Cto51ProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fetch_profile_snapshot(self.PROFILE_URL)
 
+        self.assertEqual(download.call_count, 1)
+
+    @patch("blogpost.publishers.cto51_profile.time.sleep")
+    @patch("blogpost.publishers.cto51_profile._download_profile_html")
+    def test_bot_shell_page_is_retried_until_full_page(self, download, _sleep):
+        shell = '<html><script>function a(a){EO_Bot_Ssid challenge}</script></html>'
+        download.side_effect = [shell, shell, self.MONTH_HTML]
+
+        snapshot = fetch_profile_snapshot(
+            self.PROFILE_URL,
+            now=datetime(2026, 7, 28, 10, 0),
+        )
+
+        self.assertEqual(snapshot.month_count, 18)
+        self.assertEqual(download.call_count, 3)
+
+    @patch("blogpost.publishers.cto51_profile.time.sleep")
+    @patch("blogpost.publishers.cto51_profile._download_profile_html")
+    def test_persistent_bot_shell_returns_uncertain_snapshot(self, download, _sleep):
+        shell = '<html><script>function a(a){EO_Bot_Ssid challenge}</script></html>'
+        download.side_effect = [shell, shell, shell, shell]
+
+        snapshot = fetch_profile_snapshot(
+            self.PROFILE_URL,
+            now=datetime(2026, 7, 28, 10, 0),
+        )
+
+        self.assertIsNone(snapshot.month_count)
+        self.assertIsNone(snapshot.latest_published_at)
+        self.assertIsNone(snapshot.has_publication_on(date(2026, 7, 28)))
+        self.assertEqual(download.call_count, 4)
+
+    @patch("blogpost.publishers.cto51_profile.time.sleep")
+    @patch("blogpost.publishers.cto51_profile._download_profile_html")
+    def test_small_container_page_is_not_treated_as_bot_shell(self, download, _sleep):
+        # 正常但精简的页面快照（无脚本、无容器）不应被误判为风控壳页
+        download.side_effect = [self.MONTH_HTML]
+
+        snapshot = fetch_profile_snapshot(
+            self.PROFILE_URL,
+            now=datetime(2026, 7, 28, 10, 0),
+        )
+
+        self.assertEqual(snapshot.month_count, 18)
         self.assertEqual(download.call_count, 1)
 
 

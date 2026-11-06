@@ -165,6 +165,17 @@ def parse_profile_html(
     )
 
 
+def _looks_like_bot_shell(html: str) -> bool:
+    """51CTO 风控会间歇性返回不足 5KB 的 JS 挑战壳页（无文章列表容器）。
+
+    壳页是 HTTP 200 正常响应，不触发网络异常重试；识别出来按瞬态失败
+    退避重试，稍候即可拿到服务端渲染的完整页面。
+    """
+    if "common-article-listbox-1" in html or "common-section-one" in html:
+        return False
+    return len(html) < 20_000 and "<script" in html
+
+
 def fetch_profile_snapshot(
     profile_url: str,
     *,
@@ -175,15 +186,21 @@ def fetch_profile_snapshot(
     if not re.fullmatch(r"https://blog\.51cto\.com/u_\d+", url):
         raise ValueError("51CTO 主页地址无效")
 
-    for attempt in range(2):
+    html = ""
+    for attempt in range(4):
         try:
             html = _download_profile_html(url, timeout)
-            return parse_profile_html(html, url, now=now)
         except (OSError, subprocess.TimeoutExpired):
-            if attempt == 1:
+            if attempt == 3:
                 raise
             time.sleep(0.35)
-    raise RuntimeError("unreachable")
+            continue
+        if not _looks_like_bot_shell(html):
+            return parse_profile_html(html, url, now=now)
+        if attempt < 3:
+            time.sleep(1.2 * (attempt + 1))
+    # 连续四次都是风控壳页：按原有行为解析并返回不确定状态，交上层安全停止
+    return parse_profile_html(html, url, now=now)
 
 
 def _download_profile_html(url: str, timeout: float) -> str:
