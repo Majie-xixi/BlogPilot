@@ -43,6 +43,31 @@ class GenerationWorkerTests(unittest.TestCase):
         self.assertNotIn('正在生成', window.hero_title_var.get())
         self.assertIn('已跳过', window.progress_var.get())
 
+    def test_finish_run_does_not_duplicate_terminal_progress_log(self):
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        window = MainWindow.__new__(MainWindow)
+        window.running = True
+        window.run_button = ttk.Button(root)
+        window.batch_button = ttk.Button(root)
+        window.hero_title_var = tk.StringVar(root)
+        window.progress_var = tk.StringVar(root)
+        window._complete_progress = Mock()
+        window._append_log = Mock()
+        window.refresh = Mock()
+        window._show_task_failure = Mock()
+
+        message = '安全试运行已填写文章、文章分类和个人分类，未点击最终发布'
+        window._last_progress_log = (RunStatus.SKIPPED, message)
+        window._finish_run(PublishResult(RunStatus.SKIPPED, message=message))
+        window._append_log.assert_not_called()
+        self.assertIsNone(window._last_progress_log)
+
+        window._finish_run(PublishResult(RunStatus.FAILED, message='另一个生成发布任务正在运行'))
+        window._append_log.assert_called_once()
+        self.assertIn('另一个生成发布任务正在运行', window._append_log.call_args[0][0])
+
     def test_pipeline_exception_finishes_ui_and_restores_buttons(self):
         root = tk.Tk()
         root.withdraw()

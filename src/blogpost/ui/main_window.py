@@ -322,6 +322,8 @@ def parse_persisted_log_line(line: str) -> tuple[str, str, str]:
 
 
 class MainWindow:
+    _last_progress_log: tuple[RunStatus, str] | None = None
+
     def __init__(self, root: tk.Tk, context: ApplicationContext):
         self.root = root
         self.context = context
@@ -1286,6 +1288,7 @@ class MainWindow:
                 event = self.queue.get_nowait()
                 if event[0] == "progress":
                     _, status, message = event
+                    self._last_progress_log = (status, message)
                     if status == RunStatus.GENERATING and hasattr(self, 'service_status_var'):
                         self.model_service_status = '已响应'
                         self._update_service_status()
@@ -1344,9 +1347,13 @@ class MainWindow:
         self.run_button.configure(text="立即生成并发布 →")
         self.batch_button.configure(state="normal")
         self.hero_title_var.set("任务已结束")
-        self.progress_var.set(f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}")
-        self._complete_progress(self.progress_var.get())
-        self._append_log(self.progress_var.get(), "error" if result.status == RunStatus.FAILED else "warning" if result.status in {RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW, RunStatus.SKIPPED} else "success")
+        summary = f"{STATUS_TEXT.get(result.status, result.status.value)} · {result.message or '任务已结束'}"
+        self.progress_var.set(summary)
+        self._complete_progress(summary)
+        # 结束消息通常已由最后一个进度事件记入日志，避免同一内容重复两行
+        if self._last_progress_log != (result.status, result.message):
+            self._append_log(summary, "error" if result.status == RunStatus.FAILED else "warning" if result.status in {RunStatus.UNKNOWN, RunStatus.NEEDS_REVIEW, RunStatus.SKIPPED} else "success")
+        self._last_progress_log = None
         self.refresh()
         if result.status == RunStatus.PUBLISHED:
             self._show_publish_success(result.url)
