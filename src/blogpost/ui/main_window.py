@@ -485,16 +485,12 @@ class MainWindow:
         self.progressbar.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.progress_step_var = tk.StringVar(value="")
         self.progress_pct_var = tk.StringVar(value="0%")
-        ttk.Label(
-            self.progress_frame,
-            textvariable=self.progress_step_var,
-            style="HeroText.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        # 阶段消息已由上方 progress_var 显示，这里只保留进度条和已等待时长，避免同一条消息上下重复
         ttk.Label(
             self.progress_frame,
             textvariable=self.progress_pct_var,
             style="HeroText.TLabel",
-        ).grid(row=1, column=1, sticky="e", pady=(5, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="e", pady=(5, 0))
         self.progress_frame.grid_remove()
 
         actions = ttk.Frame(page, style="Page.TFrame")
@@ -1032,7 +1028,6 @@ class MainWindow:
         self.stage_started = time.monotonic()
         self.hero_title_var.set(title)
         self.progress_var.set(message)
-        self.progress_step_var.set(message)
         self.progress_pct_var.set("已等待 0 秒")
         self.progressbar.grid_remove()
         self.progress_frame.grid()
